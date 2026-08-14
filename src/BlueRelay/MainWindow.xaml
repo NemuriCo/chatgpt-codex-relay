@@ -177,15 +177,10 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="360">
                         <StackPanel>
                             <Grid Margin="0,4,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{Binding Ui.Workflow}" FontSize="16" FontWeight="SemiBold" />
                                     <TextBlock Text="{Binding Ui.WorkflowSubtitle}" Foreground="#8993A3" FontSize="11" Margin="0,2,0,0" />
                                 </StackPanel>
-                                <Button Grid.Column="1" Content="{Binding Ui.Settings}" Command="{Binding OpenProjectManagementCommand}" Margin="8,0,0,0" />
                             </Grid>
 
                             <Border Background="#1D2630" BorderBrush="#304052" BorderThickness="1" CornerRadius="10" Padding="12" Visibility="{Binding HasWorkstreams, Converter={StaticResource BoolToVisibility}}">
