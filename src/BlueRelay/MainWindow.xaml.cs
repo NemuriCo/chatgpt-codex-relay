@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
+using BlueRelay.Diagnostics;
 
 namespace BlueRelay;
 
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
         var workArea = SystemParameters.WorkArea;
         Left = workArea.Right - Width - 20;
         Top = workArea.Bottom - Height - 20;
+        StartupDiagnostics.Write($"MainWindow Loaded IsVisible={IsVisible} Bounds={Left},{Top},{ActualWidth},{ActualHeight} WorkArea={workArea}");
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -41,6 +43,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        StartupDiagnostics.Write("MainWindow Closing intercepted; hiding to tray");
         e.Cancel = true;
         HideToTray();
     }
