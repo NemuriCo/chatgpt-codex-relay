@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>BlueRelay</AssemblyName>
+    <RootNamespace>BlueRelay</RootNamespace>
+    <Product>BlueRelay</Product>
+    <Description>A local ChatGPT Web and Codex workflow relay for Windows.</Description>
+  </PropertyGroup>
+</Project>

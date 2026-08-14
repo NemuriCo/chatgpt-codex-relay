@@ -427,3 +427,8 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# BlueRelay / cross-platform editor noise
+.idea/
+.DS_Store
+TestResults/
