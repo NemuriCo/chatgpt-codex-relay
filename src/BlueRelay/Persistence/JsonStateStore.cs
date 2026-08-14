@@ -33,7 +33,8 @@ public sealed class JsonStateStore : IStateStore
         try
         {
             await using var stream = File.OpenRead(FilePath);
-            var state = await JsonSerializer.DeserializeAsync<ApplicationState>(stream, _serializerOptions, cancellationToken);
+            var state = await JsonSerializer.DeserializeAsync<ApplicationState>(stream, _serializerOptions, cancellationToken)
+                .ConfigureAwait(false);
             state ??= new ApplicationState();
             state.Projects ??= [];
             return new StateLoadResult(state, null);
@@ -78,7 +79,8 @@ public sealed class JsonStateStore : IStateStore
         {
             await using (var stream = File.Create(temporaryPath))
             {
-                await JsonSerializer.SerializeAsync(stream, state, _serializerOptions, cancellationToken);
+                await JsonSerializer.SerializeAsync(stream, state, _serializerOptions, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             File.Move(temporaryPath, FilePath, true);
