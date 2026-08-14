@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Windows.Input;
+using BlueRelay.Localization;
 using BlueRelay.Models;
 using BlueRelay.Services;
 using BlueRelay.Services.Dialogs;
@@ -22,6 +23,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _isEditing;
     private bool _isCreating;
     private bool _isAlwaysOnTop;
+    private bool _isProjectManagementOpen;
     private string _editingName = string.Empty;
     private string _editingLocalPath = string.Empty;
     private string? _statusMessage;
@@ -38,13 +40,18 @@ public sealed class MainViewModel : ObservableObject
         _projectService = projectService;
         _dialogService = dialogService;
         _folderPicker = folderPicker;
+        Ui = LocalizationService.Current;
         _manualState = WorkflowState.Idle;
         _isAlwaysOnTop = state.IsAlwaysOnTop;
+
         StateOptions = WorkflowStateCatalog.AllStates
-            .Select(stateValue => new StateOption(stateValue, WorkflowStateCatalog.Describe(stateValue).Label))
+            .Select(stateValue => new StateOption(stateValue, Ui.GetStateLabel(stateValue)))
             .ToList();
 
         NewProjectCommand = new RelayCommand(StartNewProject);
+        OpenProjectManagementCommand = new RelayCommand(OpenProjectManagement);
+        CloseProjectManagementCommand = new RelayCommand(CloseProjectManagement);
+        ToggleCollapsedCommand = new RelayCommand(ToggleCollapsed);
         _editProjectCommand = new RelayCommand(StartEditProject, () => SelectedProject is not null && !IsEditing);
         _deleteProjectCommand = new RelayCommand(DeleteSelectedProjectAsync, () => SelectedProject is not null && !IsEditing);
         _applyStateCommand = new RelayCommand(ApplyManualStateAsync, () => SelectedProject is not null && !IsEditing);
@@ -61,11 +68,19 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public UiTextSet Ui { get; }
+
     public ObservableCollection<ProjectListItemViewModel> Projects { get; } = [];
 
     public IReadOnlyList<StateOption> StateOptions { get; }
 
     public ICommand NewProjectCommand { get; }
+
+    public ICommand OpenProjectManagementCommand { get; }
+
+    public ICommand CloseProjectManagementCommand { get; }
+
+    public ICommand ToggleCollapsedCommand { get; }
 
     public ICommand EditProjectCommand => _editProjectCommand;
 
@@ -100,7 +115,6 @@ public sealed class MainViewModel : ObservableObject
 
             _state.SelectedProjectId = value.Id;
             _ = PersistSelectionAsync();
-
             ManualState = value.CurrentState;
             RaiseCommandStates();
         }
@@ -126,6 +140,24 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public bool IsProjectManagementOpen
+    {
+        get => _isProjectManagementOpen;
+        private set => SetProperty(ref _isProjectManagementOpen, value);
+    }
+
+    public bool IsCollapsed => _state.IsWindowCollapsed;
+
+    public double? WindowLeft => _state.WindowLeft;
+
+    public double? WindowTop => _state.WindowTop;
+
+    public string CollapseGlyph => IsCollapsed ? "⌄" : "⌃";
+
+    public string CollapseToolTip => IsCollapsed ? Ui.Expand : Ui.Collapse;
+
+    public string AlwaysOnTopToolTip => IsAlwaysOnTop ? Ui.AlwaysOnTopEnabled : Ui.AlwaysOnTopDisabled;
+
     public bool HasDetails => IsEditing || SelectedProject is not null;
 
     public bool HasProjects => Projects.Count > 0;
@@ -135,7 +167,13 @@ public sealed class MainViewModel : ObservableObject
     public bool IsAlwaysOnTop
     {
         get => _isAlwaysOnTop;
-        private set => SetProperty(ref _isAlwaysOnTop, value);
+        private set
+        {
+            if (SetProperty(ref _isAlwaysOnTop, value))
+            {
+                OnPropertyChanged(nameof(AlwaysOnTopToolTip));
+            }
+        }
     }
 
     public string EditingName
@@ -158,16 +196,25 @@ public sealed class MainViewModel : ObservableObject
             if (SetProperty(ref _statusMessage, value))
             {
                 OnPropertyChanged(nameof(HasStatusMessage));
+                OnPropertyChanged(nameof(HasErrorStatus));
             }
         }
     }
 
     public bool HasStatusMessage => !string.IsNullOrWhiteSpace(StatusMessage);
 
+    public bool HasErrorStatus => HasStatusMessage && StatusIsError;
+
     public bool StatusIsError
     {
         get => _statusIsError;
-        private set => SetProperty(ref _statusIsError, value);
+        private set
+        {
+            if (SetProperty(ref _statusIsError, value))
+            {
+                OnPropertyChanged(nameof(HasErrorStatus));
+            }
+        }
     }
 
     public async Task ToggleAlwaysOnTopAsync()
@@ -178,10 +225,57 @@ public sealed class MainViewModel : ObservableObject
         if (!saveResult.Success)
         {
             SetStatus(saveResult.Error, isError: true);
-            return;
+        }
+    }
+
+    public void UpdateWindowPosition(double left, double top)
+    {
+        _state.WindowLeft = left;
+        _state.WindowTop = top;
+        OnPropertyChanged(nameof(WindowLeft));
+        OnPropertyChanged(nameof(WindowTop));
+    }
+
+    public async Task SaveWindowSettingsAsync()
+    {
+        var saveResult = await _projectService.TrySaveAsync();
+        if (!saveResult.Success)
+        {
+            SetStatus(saveResult.Error, isError: true);
+        }
+    }
+
+    private void ToggleCollapsed()
+    {
+        _state.IsWindowCollapsed = !_state.IsWindowCollapsed;
+        OnPropertyChanged(nameof(IsCollapsed));
+        OnPropertyChanged(nameof(CollapseGlyph));
+        OnPropertyChanged(nameof(CollapseToolTip));
+        _ = SaveWindowSettingsAsync();
+    }
+
+    private void OpenProjectManagement()
+    {
+        if (IsCollapsed)
+        {
+            _state.IsWindowCollapsed = false;
+            OnPropertyChanged(nameof(IsCollapsed));
+            OnPropertyChanged(nameof(CollapseGlyph));
+            OnPropertyChanged(nameof(CollapseToolTip));
+            _ = SaveWindowSettingsAsync();
         }
 
-        SetStatus(IsAlwaysOnTop ? "Always on top enabled." : "Always on top disabled.");
+        IsProjectManagementOpen = true;
+    }
+
+    private void CloseProjectManagement()
+    {
+        if (IsEditing)
+        {
+            CancelEdit();
+        }
+
+        IsProjectManagementOpen = false;
     }
 
     private void StartNewProject()
@@ -191,8 +285,9 @@ public sealed class MainViewModel : ObservableObject
         EditingName = string.Empty;
         EditingLocalPath = string.Empty;
         ManualState = WorkflowState.Idle;
+        IsProjectManagementOpen = true;
         IsEditing = true;
-        SetStatus("Create a project record. BlueRelay will not change files in the selected directory.");
+        SetStatus(Ui.CreateProjectHint);
     }
 
     private void StartEditProject()
@@ -206,8 +301,9 @@ public sealed class MainViewModel : ObservableObject
         EditingName = SelectedProject.Name;
         EditingLocalPath = SelectedProject.LocalPath;
         ManualState = SelectedProject.CurrentState;
+        IsProjectManagementOpen = true;
         IsEditing = true;
-        SetStatus("Edit the project record, then save your changes.");
+        SetStatus(Ui.EditProjectHint);
     }
 
     private async Task SaveProjectAsync()
@@ -224,7 +320,7 @@ public sealed class MainViewModel : ObservableObject
             IsEditing = false;
             _isCreating = false;
             RefreshProjects(createResult.Project!.Id);
-            SetStatus("Project created.");
+            SetStatus(Ui.ProjectCreated);
             return;
         }
 
@@ -243,7 +339,7 @@ public sealed class MainViewModel : ObservableObject
         var selectedId = SelectedProject.Id;
         IsEditing = false;
         RefreshProjects(selectedId);
-        SetStatus("Project updated.");
+        SetStatus(Ui.ProjectUpdated);
     }
 
     private void CancelEdit()
@@ -251,7 +347,7 @@ public sealed class MainViewModel : ObservableObject
         _isCreating = false;
         IsEditing = false;
         RefreshProjects(_state.SelectedProjectId);
-        SetStatus("Changes discarded.");
+        SetStatus(Ui.ChangesDiscarded);
     }
 
     private void BrowseForProjectDirectory()
@@ -272,8 +368,8 @@ public sealed class MainViewModel : ObservableObject
 
         var project = SelectedProject.Project;
         var confirmed = _dialogService.Confirm(
-            "Delete project record?",
-            $"Remove '{project.Name}' from BlueRelay?\n\nThe local directory will not be deleted.");
+            Ui.DeleteProjectTitle,
+            string.Format(Ui.DeleteProjectMessageFormat, project.Name));
         if (!confirmed)
         {
             return;
@@ -287,7 +383,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         RefreshProjects(_state.SelectedProjectId);
-        SetStatus("Project record deleted. No local files were changed.");
+        SetStatus(Ui.ProjectDeleted);
     }
 
     private async Task ApplyManualStateAsync()
@@ -308,12 +404,11 @@ public sealed class MainViewModel : ObservableObject
         }
 
         RefreshProjects(SelectedProject.Id);
-        SetStatus("Workflow state updated manually.");
+        SetStatus(Ui.WorkflowUpdated);
     }
 
     private void ProjectService_Changed(object? sender, EventArgs e)
     {
-        // All project records are refreshed together so each project retains its own state.
         RefreshProjects(_state.SelectedProjectId);
     }
 
@@ -323,7 +418,7 @@ public sealed class MainViewModel : ObservableObject
         Projects.Clear();
         foreach (var project in _state.Projects.OrderByDescending(project => project.UpdatedAt))
         {
-            Projects.Add(new ProjectListItemViewModel(project));
+            Projects.Add(new ProjectListItemViewModel(project, Ui));
         }
 
         OnPropertyChanged(nameof(HasProjects));

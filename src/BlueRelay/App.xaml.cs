@@ -81,7 +81,8 @@ public partial class App : WpfApplication
             _trayService = new TrayService(
                 showRequested: ShowMainWindow,
                 alwaysOnTopToggleRequested: ToggleAlwaysOnTop,
-                exitRequested: ExitApplication);
+                exitRequested: ExitApplication,
+                text: _mainViewModel.Ui);
             _trayService.SetAlwaysOnTop(_mainViewModel.IsAlwaysOnTop);
             StartupDiagnostics.Write("TrayService initialized");
 
@@ -136,21 +137,24 @@ public partial class App : WpfApplication
         _mainWindow.ShowFromTray();
     }
 
-    private void ToggleAlwaysOnTop()
+    private async void ToggleAlwaysOnTop()
     {
-        if (_mainViewModel is not null)
+        if (_mainViewModel is null)
         {
-            _ = _mainViewModel.ToggleAlwaysOnTopAsync();
+            return;
         }
 
-        if (_mainViewModel is not null)
-        {
-            _trayService?.SetAlwaysOnTop(_mainViewModel.IsAlwaysOnTop);
-        }
+        await _mainViewModel.ToggleAlwaysOnTopAsync();
+        _trayService?.SetAlwaysOnTop(_mainViewModel.IsAlwaysOnTop);
     }
 
-    private void ExitApplication()
+    private async void ExitApplication()
     {
+        if (_mainWindow is not null)
+        {
+            await _mainWindow.SaveWindowSettingsAsync();
+        }
+
         _trayService?.Dispose();
         _mainWindow?.CloseFromApplication();
         Shutdown();

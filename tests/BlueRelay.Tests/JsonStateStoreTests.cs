@@ -49,6 +49,47 @@ public sealed class JsonStateStoreTests
     }
 
     [TestMethod]
+    public async Task OlderStateFilesKeepProjectsAndUseNewWindowDefaults()
+    {
+        var path = Path.Combine(_testDirectory, "state.json");
+        Directory.CreateDirectory(_testDirectory);
+        var projectId = Guid.NewGuid();
+        await File.WriteAllTextAsync(
+            path,
+            $$"""{"SchemaVersion":1,"Projects":[{"Id":"{{projectId}}","Name":"Legacy","LocalPath":"C:\\Legacy","CurrentState":0}],"SelectedProjectId":"{{projectId}}","IsAlwaysOnTop":false}""");
+
+        var result = await new JsonStateStore(path).LoadAsync();
+
+        Assert.IsNull(result.Warning);
+        Assert.AreEqual(1, result.State.Projects.Count);
+        Assert.AreEqual(projectId, result.State.Projects[0].Id);
+        Assert.IsNull(result.State.WindowLeft);
+        Assert.IsNull(result.State.WindowTop);
+        Assert.IsFalse(result.State.IsWindowCollapsed);
+        Assert.IsFalse(result.State.IsAlwaysOnTop);
+    }
+
+    [TestMethod]
+    public async Task WindowSettingsRoundTripWithState()
+    {
+        var path = Path.Combine(_testDirectory, "state.json");
+        var state = new ApplicationState
+        {
+            WindowLeft = -1280.5,
+            WindowTop = 48.25,
+            IsWindowCollapsed = true
+        };
+
+        var store = new JsonStateStore(path);
+        await store.SaveAsync(state);
+        var result = await store.LoadAsync();
+
+        Assert.AreEqual(-1280.5, result.State.WindowLeft);
+        Assert.AreEqual(48.25, result.State.WindowTop);
+        Assert.IsTrue(result.State.IsWindowCollapsed);
+    }
+
+    [TestMethod]
     public async Task CorruptJsonStartsFreshAndCreatesBackup()
     {
         var path = Path.Combine(_testDirectory, "state.json");

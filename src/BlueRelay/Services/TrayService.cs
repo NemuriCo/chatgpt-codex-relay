@@ -1,5 +1,6 @@
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
+using BlueRelay.Localization;
 
 namespace BlueRelay.Services;
 
@@ -9,18 +10,19 @@ public sealed class TrayService : IDisposable
     private readonly Forms.ToolStripMenuItem _alwaysOnTopItem;
     private bool _disposed;
 
-    public TrayService(Action showRequested, Action alwaysOnTopToggleRequested, Action exitRequested)
+    public TrayService(Action showRequested, Action alwaysOnTopToggleRequested, Action exitRequested, UiTextSet? text = null)
     {
-        _alwaysOnTopItem = new Forms.ToolStripMenuItem("Always on top")
+        text ??= LocalizationService.Current;
+        _alwaysOnTopItem = new Forms.ToolStripMenuItem(text.AlwaysOnTopEnabled)
         {
             CheckOnClick = true
         };
         _alwaysOnTopItem.Click += (_, _) => alwaysOnTopToggleRequested();
 
-        var showItem = new Forms.ToolStripMenuItem("Show BlueRelay");
+        var showItem = new Forms.ToolStripMenuItem(text.TrayShow);
         showItem.Click += (_, _) => showRequested();
 
-        var exitItem = new Forms.ToolStripMenuItem("Exit");
+        var exitItem = new Forms.ToolStripMenuItem(text.TrayExit);
         exitItem.Click += (_, _) => exitRequested();
 
         var menu = new Forms.ContextMenuStrip();
@@ -32,7 +34,7 @@ public sealed class TrayService : IDisposable
         _notifyIcon = new Forms.NotifyIcon
         {
             Icon = Drawing.SystemIcons.Application,
-            Text = "BlueRelay",
+            Text = text.ProductName,
             Visible = true,
             ContextMenuStrip = menu
         };

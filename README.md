@@ -9,14 +9,17 @@ The repository is in early development. Phase 1 focuses on making the local proj
 The current MVP includes:
 
 - A .NET 8 WPF Windows desktop application.
-- A compact dark floating window with drag support and edge snapping.
-- Multiple independent project records.
+- A compact dark Windows floating window with a native-style rounded shell, explicit drag header, no resize grip, edge snapping, and persisted placement.
+- A collapsed 50px status mode for keeping the current workstream visible without covering the desktop.
+- Multiple independent project/workstream records, each with its own workflow state.
 - Friendly workflow states for the ChatGPT ↔ Codex handoff.
 - Manual state changes for testing the workflow.
-- Project creation, editing, directory selection, validation, and record deletion.
+- Project creation, editing, directory selection, validation, and record deletion in a secondary project-management view.
 - Safe local JSON persistence at `%LocalAppData%\BlueRelay\state.json`.
 - Corrupt-state backup and a user-visible recovery warning.
-- A basic system tray menu for showing BlueRelay, toggling Always on top, and exiting.
+- A system tray menu for showing BlueRelay, toggling Always on top, and exiting; closing the window hides it to the tray.
+- Windows 10/11 multi-monitor-aware placement, with the last position, collapsed state, and Always on top preference retained between launches.
+- Lightweight `zh-CN` and `en-US` UI copy selected from Windows `CurrentUICulture`; unsupported cultures fall back to English.
 - Thin `IBrowserBridge` and `ICodexBridge` interfaces for future integrations.
 
 Deleting a project only removes BlueRelay's saved record. It never deletes or changes the selected local directory.
@@ -56,10 +59,12 @@ From the repository root:
 dotnet restore
 dotnet build
 dotnet run --project src/BlueRelay/BlueRelay.csproj
-dotnet test
+dotnet test .\BlueRelay.sln
 ```
 
-Closing the window hides BlueRelay to the system tray. Choose `Exit` from the tray menu to stop the application.
+Run `dotnet run --project src/BlueRelay/BlueRelay.csproj` to start the desktop app. The first launch creates the local state file. Closing the floating window hides BlueRelay to the system tray; choose `Exit` from the tray menu to stop the application. The project-management button in the header is the place to add or edit project records, while the main view stays focused on workflow status and the next action.
+
+Phase 1 stores local project metadata and workflow status only. It does not yet connect to ChatGPT Web, Codex, a browser extension, or any cloud service. The current window layout should be visually checked on a real Windows desktop, especially with multiple monitors and different display scaling.
 
 ## Roadmap
 

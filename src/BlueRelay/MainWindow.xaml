@@ -1,170 +1,360 @@
 <Window x:Class="BlueRelay.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="BlueRelay"
-        Width="390"
-        Height="650"
-        MinWidth="340"
-        MinHeight="440"
+        Width="378"
+        Height="320"
+        MinWidth="360"
+        MaxWidth="390"
+        MinHeight="0"
+        MaxHeight="480"
+        SizeToContent="Height"
         WindowStartupLocation="Manual"
         WindowStyle="None"
-        ResizeMode="CanResizeWithGrip"
-        Background="#15171D"
+        ResizeMode="NoResize"
+        AllowsTransparency="False"
+        Background="Transparent"
         Foreground="#F4F5F7"
         Topmost="{Binding IsAlwaysOnTop}"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         Loaded="Window_Loaded"
+        LocationChanged="Window_LocationChanged"
+        SourceInitialized="Window_SourceInitialized"
+        PreviewMouseLeftButtonUp="Window_PreviewMouseLeftButtonUp"
         Closing="Window_Closing">
-    <Border BorderBrush="#303641" BorderThickness="1" CornerRadius="12" Background="#15171D">
-        <Grid Margin="16">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="42"
+                            ResizeBorderThickness="0"
+                            GlassFrameThickness="0"
+                            CornerRadius="14"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Border BorderBrush="#36404E"
+            BorderThickness="1"
+            CornerRadius="14"
+            Background="#15171D">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.28" Color="#000000" />
+        </Border.Effect>
+        <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="220" />
-                <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" Background="#1B1F26" CornerRadius="8" Padding="10,8" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+            <Grid Grid.Row="0" MinHeight="42" Margin="14,0,12,0" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Ellipse Width="3" Height="3" Fill="#6B7482" Margin="0,0,3,0" />
+                        <Ellipse Width="3" Height="3" Fill="#6B7482" Margin="0,0,3,0" />
+                        <Ellipse Width="3" Height="3" Fill="#6B7482" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,3,0,0">
+                        <Ellipse Width="3" Height="3" Fill="#6B7482" Margin="0,0,3,0" />
+                        <Ellipse Width="3" Height="3" Fill="#6B7482" Margin="0,0,3,0" />
+                        <Ellipse Width="3" Height="3" Fill="#6B7482" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Ui.ProductName}" FontSize="15" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Ui.ProductSubtitle}" Foreground="#8993A3" FontSize="10" Margin="0,1,0,0" />
+                </StackPanel>
+
+                <Button Grid.Column="2"
+                        Width="30"
+                        Height="28"
+                        Padding="0"
+                        Margin="4,0,0,0"
+                        Command="{Binding ToggleAlwaysOnTopCommand}"
+                        ToolTip="{Binding AlwaysOnTopToolTip}"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <TextBlock Text="⌖" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Button>
+                <Button Grid.Column="3"
+                        Width="30"
+                        Height="28"
+                        Padding="0"
+                        Margin="4,0,0,0"
+                        Command="{Binding ToggleCollapsedCommand}"
+                        ToolTip="{Binding CollapseToolTip}"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <TextBlock Text="{Binding CollapseGlyph}" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Button>
+                <Button Grid.Column="4"
+                        Width="30"
+                        Height="28"
+                        Padding="0"
+                        Margin="4,0,0,0"
+                        Command="{Binding OpenProjectManagementCommand}"
+                        ToolTip="{Binding Ui.Settings}"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <TextBlock Text="⋯" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Button>
+                <Button Grid.Column="5"
+                        Width="30"
+                        Height="28"
+                        Padding="0"
+                        Margin="4,0,0,0"
+                        Click="HideButton_Click"
+                        ToolTip="{Binding Ui.HideToTray}"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <TextBlock Text="×" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Button>
+            </Grid>
+
+            <Border Grid.Row="0"
+                    Height="50"
+                    Background="#1B1F26"
+                    BorderBrush="#36404E"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="10,6"
+                    Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}}">
                 <Grid>
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="BlueRelay" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="ChatGPT ↔ Codex workflow" Foreground="#8D96A5" FontSize="11" Margin="0,2,0,0" />
+                    <Ellipse Width="7" Height="7" Fill="{Binding SelectedProject.StatusBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding SelectedProject.Name, TargetNullValue=BlueRelay}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding SelectedProject.StatusLabel}" Foreground="#AAB2BF" FontSize="10" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding SelectedProject.PendingLabel}" Foreground="#F1C75B" FontSize="9" Margin="8,0,0,0" />
+                        </StackPanel>
                     </StackPanel>
-                    <Button Grid.Column="1" Width="32" Height="28" Padding="0" Margin="4,0,0,0" Command="{Binding ToggleAlwaysOnTopCommand}" ToolTip="Toggle always on top">
-                        <TextBlock Text="⌖" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Button Grid.Column="2"
+                            Width="30"
+                            Height="28"
+                            Padding="0"
+                            Margin="4,0,0,0"
+                            Command="{Binding ToggleAlwaysOnTopCommand}"
+                            ToolTip="{Binding AlwaysOnTopToolTip}"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <TextBlock Text="⌖" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Button>
-                    <Button Grid.Column="2" Width="32" Height="28" Padding="0" Margin="4,0,0,0" Click="HideButton_Click" ToolTip="Hide to tray">
-                        <TextBlock Text="—" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Button Grid.Column="3"
+                            Width="30"
+                            Height="28"
+                            Padding="0"
+                            Margin="4,0,0,0"
+                            Command="{Binding ToggleCollapsedCommand}"
+                            ToolTip="{Binding CollapseToolTip}"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <TextBlock Text="{Binding CollapseGlyph}" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Button>
-                    <Button Grid.Column="3" Width="32" Height="28" Padding="0" Margin="4,0,0,0" Click="HideButton_Click" ToolTip="Hide to tray">
-                        <TextBlock Text="×" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Button Grid.Column="4"
+                            Width="30"
+                            Height="28"
+                            Padding="0"
+                            Margin="4,0,0,0"
+                            Click="HideButton_Click"
+                            ToolTip="{Binding Ui.HideToTray}"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <TextBlock Text="×" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Button>
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1" Margin="0,10,0,0" Padding="8" Background="#2C2920" CornerRadius="6" Visibility="{Binding HasStatusMessage, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#F1C75B" FontSize="11" />
-            </Border>
-
-            <Grid Grid.Row="2" Margin="0,14,0,7">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Text="Projects" FontSize="14" FontWeight="SemiBold" />
-                    <TextBlock Text="Each project keeps its own workflow state." Foreground="#8D96A5" FontSize="11" Margin="0,2,0,0" />
-                </StackPanel>
-                <Button Grid.Column="1" Content="New project" Command="{Binding NewProjectCommand}" Margin="6,0,0,0" />
-            </Grid>
-
-            <Border Grid.Row="3" Background="#1B1F26" CornerRadius="8" Padding="4">
-                <Grid>
-                    <ListBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject, Mode=TwoWay}" IsEnabled="{Binding IsProjectListEnabled}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Ellipse Grid.Column="0" Width="8" Height="8" Fill="{Binding StatusBrush}" VerticalAlignment="Top" Margin="0,4,8,0" />
-                                    <StackPanel Grid.Column="1">
-                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding StatusLabel}" Foreground="#AAB2BF" FontSize="11" Margin="0,3,0,0" />
-                                    </StackPanel>
-                                    <TextBlock Grid.Column="2" Text="{Binding StatusMarker}" Foreground="{Binding StatusBrush}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                    <TextBlock Text="No projects yet. Add one to start tracking a workflow." TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#8D96A5" FontSize="12" Visibility="{Binding HasProjects, Converter={StaticResource InverseBoolToVisibility}}" />
-                </Grid>
-            </Border>
-
-            <Border Grid.Row="4" Margin="0,12,0,0" Background="#1B1F26" CornerRadius="8" Padding="12" Visibility="{Binding HasDetails, Converter={StaticResource BoolToVisibility}}">
-                <Grid>
-                    <Grid Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibility}}">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <TextBlock Text="Project details" FontSize="14" FontWeight="SemiBold" />
-                        <TextBlock Grid.Row="1" Text="Name" Foreground="#8D96A5" FontSize="11" Margin="0,12,0,4" />
-                        <TextBox Grid.Row="2" Text="{Binding EditingName, UpdateSourceTrigger=PropertyChanged}" />
-                        <Grid Grid.Row="3" Margin="0,10,0,0">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="Local path" Foreground="#8D96A5" FontSize="11" Margin="0,0,0,4" />
-                            <Grid Grid.Row="1">
+            <Grid Grid.Row="1">
+                <Grid Margin="12,0,12,12" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="360">
+                        <StackPanel>
+                            <Grid Margin="0,4,0,10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBox Grid.Column="0" Text="{Binding EditingLocalPath, UpdateSourceTrigger=PropertyChanged}" />
-                                <Button Grid.Column="1" Content="Browse" Command="{Binding BrowsePathCommand}" Margin="6,0,0,0" />
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Ui.Workflow}" FontSize="16" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Ui.WorkflowSubtitle}" Foreground="#8993A3" FontSize="11" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="{Binding Ui.Settings}" Command="{Binding OpenProjectManagementCommand}" Margin="8,0,0,0" />
                             </Grid>
-                            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-                                <Button Content="Cancel" Command="{Binding CancelEditCommand}" />
-                                <Button Content="Save project" Command="{Binding SaveProjectCommand}" Background="#2C8B75" BorderBrush="#3BAA90" />
-                            </StackPanel>
-                        </Grid>
-                    </Grid>
 
-                    <Grid Visibility="{Binding IsEditing, Converter={StaticResource InverseBoolToVisibility}}">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <Grid>
-                            <StackPanel>
-                                <TextBlock Text="{Binding SelectedProject.Name}" FontSize="16" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding SelectedProject.StatusLabel}" Foreground="{Binding SelectedProject.StatusBrush}" FontSize="11" Margin="0,3,0,0" />
-                            </StackPanel>
-                            <TextBlock Text="{Binding SelectedProject.StatusMarker}" Foreground="{Binding SelectedProject.StatusBrush}" FontSize="20" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                        </Grid>
-                        <TextBlock Grid.Row="1" Text="Local path" Foreground="#8D96A5" FontSize="11" Margin="0,13,0,3" />
-                        <TextBlock Grid.Row="2" Text="{Binding SelectedProject.LocalPath}" TextWrapping="Wrap" Foreground="#D7DBE2" FontSize="11" />
-                        <Grid Grid.Row="3" Margin="0,12,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Current task" Foreground="#8D96A5" FontSize="11" />
-                            <TextBlock Grid.Column="1" Text="{Binding SelectedProject.CurrentTaskText}" Foreground="#D7DBE2" FontSize="11" Margin="10,0,0,0" />
-                        </Grid>
-                        <Grid Grid.Row="4" Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Content="Edit" Command="{Binding EditProjectCommand}" />
-                                <Button Content="Delete" Command="{Binding DeleteProjectCommand}" Background="#3A252A" BorderBrush="#70404B" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <ComboBox Width="165" ItemsSource="{Binding StateOptions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ManualState, Mode=TwoWay}" />
-                                <Button Content="Apply state" Command="{Binding ApplyStateCommand}" Background="#2C8B75" BorderBrush="#3BAA90" Margin="6,0,0,0" />
-                            </StackPanel>
-                        </Grid>
-                    </Grid>
+                            <Border Background="#1D2630" BorderBrush="#304052" BorderThickness="1" CornerRadius="10" Padding="12" Visibility="{Binding HasProjects, Converter={StaticResource BoolToVisibility}}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding SelectedProject.Name}" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding SelectedProject.StatusLabel}" Foreground="{Binding SelectedProject.StatusBrush}" FontSize="11" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding SelectedProject.StatusMarker}" Foreground="{Binding SelectedProject.StatusBrush}" FontSize="20" HorizontalAlignment="Right" />
+                                    </Grid>
+                                    <TextBlock Grid.Row="1" Text="{Binding SelectedProject.Guidance}" Foreground="#CDD4DE" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <Grid Grid.Row="2" Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Ui.NextAction}" Foreground="#8993A3" FontSize="10" />
+                                        <TextBlock Grid.Column="1" Text="{Binding SelectedProject.StatusLabel}" Foreground="#F4F5F7" FontSize="10" Margin="8,0,0,0" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Background="#1B1F26" BorderBrush="#2D3642" BorderThickness="1" CornerRadius="10" Padding="8" Margin="0,10,0,0" Visibility="{Binding HasProjects, Converter={StaticResource BoolToVisibility}}">
+                                <ListBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject, Mode=TwoWay}" MaxHeight="142">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,1,0,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Ellipse Width="7" Height="7" Fill="{Binding StatusBrush}" VerticalAlignment="Top" Margin="0,5,8,0" />
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Guidance}" Foreground="#9BA5B4" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding StatusMarker}" Foreground="{Binding StatusBrush}" FontSize="15" HorizontalAlignment="Right" />
+                                                    <TextBlock Text="{Binding PendingLabel}" Foreground="#F1C75B" FontSize="9" HorizontalAlignment="Right" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+
+                            <Border Background="#1B1F26" BorderBrush="#2D3642" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,10,0,0" Visibility="{Binding HasProjects, Converter={StaticResource InverseBoolToVisibility}}">
+                                <StackPanel HorizontalAlignment="Center">
+                                    <TextBlock Text="{Binding Ui.EmptyTitle}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                    <TextBlock Text="{Binding Ui.EmptyDescription}" Foreground="#9BA5B4" FontSize="11" TextWrapping="Wrap" TextAlignment="Center" Margin="0,5,0,10" />
+                                    <Button Content="{Binding Ui.AddProject}" Command="{Binding NewProjectCommand}" HorizontalAlignment="Center" Background="#2C8B75" BorderBrush="#3BAA90" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </Grid>
-            </Border>
+
+                <Border Panel.ZIndex="5" Margin="12,0,12,12" Background="#171A21" BorderBrush="#3A4554" BorderThickness="1" CornerRadius="10" Padding="12" Visibility="{Binding IsProjectManagementOpen, Converter={StaticResource BoolToVisibility}}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="410">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Ui.ProjectManagement}" FontSize="15" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Ui.ProjectManagementSubtitle}" Foreground="#8993A3" FontSize="10" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <Button Content="{Binding Ui.Close}" Command="{Binding CloseProjectManagementCommand}" HorizontalAlignment="Right" Padding="9,5" />
+                            </Grid>
+
+                            <Border Background="#2C2920" CornerRadius="7" Padding="8" Margin="0,0,0,8" Visibility="{Binding HasErrorStatus, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#F1C75B" FontSize="10" />
+                            </Border>
+
+                            <Grid Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibility}}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="{Binding Ui.ProjectDetails}" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="1" Text="{Binding Ui.Name}" Foreground="#8993A3" FontSize="10" Margin="0,10,0,4" />
+                                <TextBox Grid.Row="2" Text="{Binding EditingName, UpdateSourceTrigger=PropertyChanged}" />
+                                <Grid Grid.Row="3" Margin="0,9,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="{Binding Ui.LocalPath}" Foreground="#8993A3" FontSize="10" Margin="0,0,0,4" />
+                                    <Grid Grid.Row="1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding EditingLocalPath, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Button Grid.Column="1" Content="{Binding Ui.Browse}" Command="{Binding BrowsePathCommand}" Margin="6,0,0,0" />
+                                    </Grid>
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,11,0,0">
+                                        <Button Content="{Binding Ui.Cancel}" Command="{Binding CancelEditCommand}" />
+                                        <Button Content="{Binding Ui.SaveProject}" Command="{Binding SaveProjectCommand}" Background="#2C8B75" BorderBrush="#3BAA90" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+
+                            <Grid Visibility="{Binding IsEditing, Converter={StaticResource InverseBoolToVisibility}}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ListBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject, Mode=TwoWay}" MaxHeight="112">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" Foreground="{Binding StatusBrush}" FontSize="10" Margin="8,0,0,0" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <Button Grid.Row="1" Content="{Binding Ui.NewProject}" Command="{Binding NewProjectCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                                <Grid Grid.Row="2" Margin="0,10,0,0" Visibility="{Binding HasDetails, Converter={StaticResource BoolToVisibility}}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding SelectedProject.Name}" FontSize="13" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding SelectedProject.LocalPath}" Foreground="#9BA5B4" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding SelectedProject.StatusLabel}" Foreground="{Binding SelectedProject.StatusBrush}" FontSize="10" HorizontalAlignment="Right" />
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Ui.CurrentTask}" Foreground="#8993A3" FontSize="10" />
+                                        <TextBlock Grid.Column="1" Text="{Binding SelectedProject.CurrentTaskText}" Foreground="#D7DBE2" FontSize="10" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                    <Grid Grid.Row="2" Margin="0,10,0,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button Content="{Binding Ui.Edit}" Command="{Binding EditProjectCommand}" />
+                                            <Button Content="{Binding Ui.Delete}" Command="{Binding DeleteProjectCommand}" Background="#3A252A" BorderBrush="#70404B" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <ComboBox Width="145" ItemsSource="{Binding StateOptions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ManualState, Mode=TwoWay}" />
+                                            <Button Content="{Binding Ui.ApplyState}" Command="{Binding ApplyStateCommand}" Background="#2C8B75" BorderBrush="#3BAA90" Margin="6,0,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
         </Grid>
     </Border>
 </Window>
