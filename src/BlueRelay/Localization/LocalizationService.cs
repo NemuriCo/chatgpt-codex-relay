@@ -23,6 +23,9 @@ public sealed class UiTextSet
     public required string Workstream { get; init; }
     public required string DefaultWorkstream { get; init; }
     public required string WorkstreamManagement { get; init; }
+    public required string WorkstreamCountLabel { get; init; }
+    public required string NoSession { get; init; }
+    public required string DebugState { get; init; }
     public required string NewWorkstream { get; init; }
     public required string RenameWorkstream { get; init; }
     public required string DeleteWorkstream { get; init; }
@@ -50,7 +53,6 @@ public sealed class UiTextSet
     public required string SaveProject { get; init; }
     public required string SaveWorkstream { get; init; }
     public required string Close { get; init; }
-    public required string ApplyState { get; init; }
     public required string DeleteProjectTitle { get; init; }
     public required string DeleteProjectMessageFormat { get; init; }
     public required string TrayShow { get; init; }
@@ -107,7 +109,7 @@ public static class LocalizationService
         Collapse = "Collapse",
         Expand = "Expand",
         HideToTray = "Hide to tray",
-        Settings = "Project settings",
+        Settings = "Project management",
         Workflow = "Workflow",
         WorkflowSubtitle = "See what is happening and who acts next.",
         NextAction = "Next action",
@@ -118,6 +120,9 @@ public static class LocalizationService
         Workstream = "Workstream",
         DefaultWorkstream = "Default",
         WorkstreamManagement = "Workstreams",
+        WorkstreamCountLabel = "workstreams",
+        NoSession = "No session linked",
+        DebugState = "Debug state",
         NewWorkstream = "New workstream",
         RenameWorkstream = "Rename",
         DeleteWorkstream = "Delete",
@@ -129,11 +134,11 @@ public static class LocalizationService
         WorkstreamUpdated = "Workstream updated.",
         WorkstreamDeleted = "Workstream deleted.",
         ProjectManagement = "Project management",
-        ProjectManagementSubtitle = "Add or edit project records. Local files are never changed.",
+        ProjectManagementSubtitle = "Manage project records and workstreams. Local files are never changed.",
         AddProject = "Add project",
         NewProject = "New project",
         EmptyTitle = "No workflow yet",
-        EmptyDescription = "Add a project to keep its handoff state visible here.",
+        EmptyDescription = "Add a project and BlueRelay will show the ChatGPT ↔ Codex handoff state here.",
         NoProjects = "No projects yet.",
         ProjectDetails = "Project details",
         Name = "Name",
@@ -145,7 +150,6 @@ public static class LocalizationService
         SaveProject = "Save project",
         SaveWorkstream = "Save workstream",
         Close = "Close",
-        ApplyState = "Apply state",
         DeleteProjectTitle = "Delete project record?",
         DeleteProjectMessageFormat = "Remove '{0}' from BlueRelay?\n\nThe local directory will not be deleted.",
         TrayShow = "Show BlueRelay",
@@ -199,7 +203,7 @@ public static class LocalizationService
         Collapse = "折叠",
         Expand = "展开",
         HideToTray = "隐藏到托盘",
-        Settings = "项目设置",
+        Settings = "项目管理",
         Workflow = "工作流",
         WorkflowSubtitle = "查看当前进度和下一位执行者。",
         NextAction = "下一步",
@@ -210,6 +214,9 @@ public static class LocalizationService
         Workstream = "工作流",
         DefaultWorkstream = "默认工作流",
         WorkstreamManagement = "工作流管理",
+        WorkstreamCountLabel = "个工作流",
+        NoSession = "暂无会话绑定",
+        DebugState = "调试状态",
         NewWorkstream = "新建工作流",
         RenameWorkstream = "重命名",
         DeleteWorkstream = "删除",
@@ -221,11 +228,11 @@ public static class LocalizationService
         WorkstreamUpdated = "工作流已更新。",
         WorkstreamDeleted = "工作流已删除。",
         ProjectManagement = "项目管理",
-        ProjectManagementSubtitle = "添加或编辑项目记录，不会修改本地文件。",
+        ProjectManagementSubtitle = "管理项目和工作流记录，不会修改本地文件。",
         AddProject = "添加项目",
         NewProject = "新建项目",
         EmptyTitle = "还没有工作流",
-        EmptyDescription = "添加项目后，就能在这里看到它的交接状态。",
+        EmptyDescription = "添加项目后，这里会显示 ChatGPT ↔ Codex 的接力状态。",
         NoProjects = "还没有项目。",
         ProjectDetails = "项目详情",
         Name = "名称",
@@ -237,7 +244,6 @@ public static class LocalizationService
         SaveProject = "保存项目",
         SaveWorkstream = "保存工作流",
         Close = "关闭",
-        ApplyState = "应用状态",
         DeleteProjectTitle = "删除项目记录？",
         DeleteProjectMessageFormat = "要从 BlueRelay 删除“{0}”吗？\n\n不会删除本地目录。",
         TrayShow = "显示 BlueRelay",

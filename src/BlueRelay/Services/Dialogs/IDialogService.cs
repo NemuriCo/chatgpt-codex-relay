@@ -2,7 +2,7 @@ namespace BlueRelay.Services.Dialogs;
 
 public interface IDialogService
 {
-    bool Confirm(string title, string message);
+    Task<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default);
 
-    void ShowError(string title, string message);
+    Task ShowErrorAsync(string title, string message, CancellationToken cancellationToken = default);
 }

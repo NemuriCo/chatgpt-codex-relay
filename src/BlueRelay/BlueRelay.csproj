@@ -12,4 +12,8 @@
     <Product>BlueRelay</Product>
     <Description>A local ChatGPT Web and Codex workflow relay for Windows.</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
 </Project>

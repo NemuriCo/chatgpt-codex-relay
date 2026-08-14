@@ -126,6 +126,32 @@ public partial class MainWindow : Window
         HideToTray();
     }
 
+    private void OpenContextMenuButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.ContextMenu is not null)
+        {
+            element.ContextMenu.PlacementTarget = element;
+            element.ContextMenu.IsOpen = true;
+            e.Handled = true;
+        }
+    }
+
+    private void ProjectCard_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel && sender is FrameworkElement element && element.DataContext is Models.Project project)
+        {
+            viewModel.SelectProjectCommand.Execute(project);
+        }
+    }
+
+    private void WorkstreamCard_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel && sender is FrameworkElement element && element.DataContext is ProjectListItemViewModel workstream)
+        {
+            viewModel.SelectWorkstreamCommand.Execute(workstream);
+        }
+    }
+
     private void HideToTray()
     {
         if (DataContext is MainViewModel viewModel)

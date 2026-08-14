@@ -13,9 +13,11 @@ public sealed class LocalizationTests
         var text = LocalizationService.ForCulture(CultureInfo.GetCultureInfo("zh-CN"));
 
         Assert.AreEqual("等待新任务", text.GetStateLabel(WorkflowState.Idle));
-        Assert.AreEqual("项目设置", text.Settings);
+        Assert.AreEqual("项目管理", text.Settings);
         Assert.AreEqual("默认工作流", text.DefaultWorkstream);
         Assert.AreEqual("刷新 Git 信息", text.RefreshGit);
+        Assert.AreEqual("个工作流", text.WorkstreamCountLabel);
+        Assert.AreEqual("暂无会话绑定", text.NoSession);
     }
 
     [TestMethod]
@@ -24,7 +26,9 @@ public sealed class LocalizationTests
         var text = LocalizationService.ForCulture(CultureInfo.GetCultureInfo("fr-FR"));
 
         Assert.AreEqual("Waiting for a new task", text.GetStateLabel(WorkflowState.Idle));
-        Assert.AreEqual("Project settings", text.Settings);
+        Assert.AreEqual("Project management", text.Settings);
         Assert.AreEqual("Default", text.DefaultWorkstream);
+        Assert.AreEqual("workstreams", text.WorkstreamCountLabel);
+        Assert.AreEqual("No session linked", text.NoSession);
     }
 }

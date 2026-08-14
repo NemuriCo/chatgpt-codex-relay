@@ -131,4 +131,50 @@ public sealed class ProjectServiceTests
         var reloaded = await store.LoadAsync();
         Assert.AreEqual(0, reloaded.State.Projects.Count);
     }
+
+    [TestMethod]
+    public async Task StateChangeRestoresThePreviousValueWhenPersistenceFails()
+    {
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Name = "Project",
+            LocalPath = _testDirectory
+        };
+        var workstream = new Workstream
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Id,
+            Name = "Workstream",
+            CurrentState = WorkflowState.Idle,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        project.Workstreams.Add(workstream);
+        var state = new ApplicationState { Projects = [project] };
+        var originalWorkstreamUpdatedAt = workstream.UpdatedAt;
+        var originalProjectUpdatedAt = project.UpdatedAt;
+        var service = new ProjectService(state, new FailingStateStore(), new WorkflowStateMachine());
+
+        var result = await service.TryChangeStateAsync(project.Id, workstream.Id, WorkflowState.CodexRunning, manualOverride: true);
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual(WorkflowState.Idle, workstream.CurrentState);
+        Assert.AreEqual(originalWorkstreamUpdatedAt, workstream.UpdatedAt);
+        Assert.AreEqual(originalProjectUpdatedAt, project.UpdatedAt);
+    }
+
+    private sealed class FailingStateStore : IStateStore
+    {
+        public string FilePath => Path.Combine(Path.GetTempPath(), "BlueRelayTests", "failing-state.json");
+
+        public Task<StateLoadResult> LoadAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new StateLoadResult(new ApplicationState(), null));
+        }
+
+        public Task SaveAsync(ApplicationState state, CancellationToken cancellationToken = default)
+        {
+            return Task.FromException(new IOException("simulated persistence failure"));
+        }
+    }
 }
