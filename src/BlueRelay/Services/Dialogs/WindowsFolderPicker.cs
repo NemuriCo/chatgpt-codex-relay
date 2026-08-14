@@ -1,14 +1,22 @@
 using Forms = System.Windows.Forms;
+using BlueRelay.Localization;
 
 namespace BlueRelay.Services.Dialogs;
 
 public sealed class WindowsFolderPicker : IFolderPicker
 {
+    private readonly UiTextSet _text;
+
+    public WindowsFolderPicker(UiTextSet? text = null)
+    {
+        _text = text ?? LocalizationService.Current;
+    }
+
     public string? Pick(string? initialPath)
     {
         using var dialog = new Forms.FolderBrowserDialog
         {
-            Description = "Choose the local project directory.",
+            Description = _text.ChooseProjectDirectory,
             UseDescriptionForTitle = true,
             ShowNewFolderButton = false
         };

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace BlueRelay.Models;
 
 public sealed class Project
@@ -8,16 +10,26 @@ public sealed class Project
 
     public string LocalPath { get; set; } = string.Empty;
 
-    public WorkflowState CurrentState { get; set; } = WorkflowState.Idle;
-
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    // Reserved for future browser-tab and session binding.
-    public string? ChatGPTTab { get; set; }
+    public List<Workstream> Workstreams { get; set; } = [];
 
-    public string? CodexSessionId { get; set; }
+    // These nullable compatibility fields are consumed by StateMigration and omitted after migration.
+    [JsonPropertyName("CurrentState")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorkflowState? LegacyCurrentState { get; set; }
 
-    public string? CurrentTaskId { get; set; }
+    [JsonPropertyName("ChatGPTTab")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyChatGPTTab { get; set; }
+
+    [JsonPropertyName("CodexSessionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyCodexSessionId { get; set; }
+
+    [JsonPropertyName("CurrentTaskId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyCurrentTaskId { get; set; }
 }

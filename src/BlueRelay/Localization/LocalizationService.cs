@@ -20,6 +20,19 @@ public sealed class UiTextSet
     public required string CurrentTask { get; init; }
     public required string CurrentTaskNone { get; init; }
     public required string Projects { get; init; }
+    public required string Workstream { get; init; }
+    public required string DefaultWorkstream { get; init; }
+    public required string WorkstreamManagement { get; init; }
+    public required string NewWorkstream { get; init; }
+    public required string RenameWorkstream { get; init; }
+    public required string DeleteWorkstream { get; init; }
+    public required string WorkstreamName { get; init; }
+    public required string DeleteWorkstreamTitle { get; init; }
+    public required string DeleteWorkstreamMessageFormat { get; init; }
+    public required string LastWorkstreamRequired { get; init; }
+    public required string WorkstreamCreated { get; init; }
+    public required string WorkstreamUpdated { get; init; }
+    public required string WorkstreamDeleted { get; init; }
     public required string ProjectManagement { get; init; }
     public required string ProjectManagementSubtitle { get; init; }
     public required string AddProject { get; init; }
@@ -35,6 +48,7 @@ public sealed class UiTextSet
     public required string Delete { get; init; }
     public required string Cancel { get; init; }
     public required string SaveProject { get; init; }
+    public required string SaveWorkstream { get; init; }
     public required string Close { get; init; }
     public required string ApplyState { get; init; }
     public required string DeleteProjectTitle { get; init; }
@@ -48,6 +62,17 @@ public sealed class UiTextSet
     public required string WorkflowUpdated { get; init; }
     public required string CreateProjectHint { get; init; }
     public required string EditProjectHint { get; init; }
+    public required string ChooseProjectDirectory { get; init; }
+    public required string GitDetected { get; init; }
+    public required string GitNotDetected { get; init; }
+    public required string GitUnavailable { get; init; }
+    public required string GitRepositoryHint { get; init; }
+    public required string GitNotRepositoryHint { get; init; }
+    public required string GitUnavailableHint { get; init; }
+    public required string RepositoryRoot { get; init; }
+    public required string SelectedFolder { get; init; }
+    public required string UseRepositoryRoot { get; init; }
+    public required string RefreshGit { get; init; }
 
     public required IReadOnlyDictionary<WorkflowState, string> StateLabels { get; init; }
     public required IReadOnlyDictionary<WorkflowState, string> StateGuidance { get; init; }
@@ -90,6 +115,19 @@ public static class LocalizationService
         CurrentTask = "Current task",
         CurrentTaskNone = "No task assigned",
         Projects = "Workstreams",
+        Workstream = "Workstream",
+        DefaultWorkstream = "Default",
+        WorkstreamManagement = "Workstreams",
+        NewWorkstream = "New workstream",
+        RenameWorkstream = "Rename",
+        DeleteWorkstream = "Delete",
+        WorkstreamName = "Workstream name",
+        DeleteWorkstreamTitle = "Delete workstream?",
+        DeleteWorkstreamMessageFormat = "Remove '{0}' from this project?",
+        LastWorkstreamRequired = "At least one workstream must remain in a project.",
+        WorkstreamCreated = "Workstream created.",
+        WorkstreamUpdated = "Workstream updated.",
+        WorkstreamDeleted = "Workstream deleted.",
         ProjectManagement = "Project management",
         ProjectManagementSubtitle = "Add or edit project records. Local files are never changed.",
         AddProject = "Add project",
@@ -105,6 +143,7 @@ public static class LocalizationService
         Delete = "Delete",
         Cancel = "Cancel",
         SaveProject = "Save project",
+        SaveWorkstream = "Save workstream",
         Close = "Close",
         ApplyState = "Apply state",
         DeleteProjectTitle = "Delete project record?",
@@ -118,6 +157,17 @@ public static class LocalizationService
         WorkflowUpdated = "Workflow state updated manually.",
         CreateProjectHint = "Create a project record. BlueRelay will not change files in the selected directory.",
         EditProjectHint = "Edit the project record, then save your changes.",
+        ChooseProjectDirectory = "Choose the local project directory.",
+        GitDetected = "Git repository detected",
+        GitNotDetected = "Git repository not detected",
+        GitUnavailable = "Git not detected",
+        GitRepositoryHint = "The repository root and name were filled from Git.",
+        GitNotRepositoryHint = "No Git repository was found. The selected folder will be used.",
+        GitUnavailableHint = "Git is unavailable. The selected folder name will be used.",
+        RepositoryRoot = "Repository root",
+        SelectedFolder = "Selected folder",
+        UseRepositoryRoot = "Use repository root",
+        RefreshGit = "Refresh Git info",
         StateLabels = new Dictionary<WorkflowState, string>
         {
             [WorkflowState.Idle] = "Waiting for a new task",
@@ -157,6 +207,19 @@ public static class LocalizationService
         CurrentTask = "当前任务",
         CurrentTaskNone = "未分配任务",
         Projects = "工作流",
+        Workstream = "工作流",
+        DefaultWorkstream = "默认工作流",
+        WorkstreamManagement = "工作流管理",
+        NewWorkstream = "新建工作流",
+        RenameWorkstream = "重命名",
+        DeleteWorkstream = "删除",
+        WorkstreamName = "工作流名称",
+        DeleteWorkstreamTitle = "删除工作流？",
+        DeleteWorkstreamMessageFormat = "要从此项目删除“{0}”吗？",
+        LastWorkstreamRequired = "每个项目至少要保留一个工作流。",
+        WorkstreamCreated = "工作流已创建。",
+        WorkstreamUpdated = "工作流已更新。",
+        WorkstreamDeleted = "工作流已删除。",
         ProjectManagement = "项目管理",
         ProjectManagementSubtitle = "添加或编辑项目记录，不会修改本地文件。",
         AddProject = "添加项目",
@@ -172,6 +235,7 @@ public static class LocalizationService
         Delete = "删除",
         Cancel = "取消",
         SaveProject = "保存项目",
+        SaveWorkstream = "保存工作流",
         Close = "关闭",
         ApplyState = "应用状态",
         DeleteProjectTitle = "删除项目记录？",
@@ -185,6 +249,17 @@ public static class LocalizationService
         WorkflowUpdated = "工作流状态已手动更新。",
         CreateProjectHint = "创建项目记录。BlueRelay 不会修改所选目录中的文件。",
         EditProjectHint = "编辑项目记录，然后保存修改。",
+        ChooseProjectDirectory = "选择本地项目目录。",
+        GitDetected = "检测到 Git 仓库",
+        GitNotDetected = "未检测到 Git 仓库",
+        GitUnavailable = "未检测到 Git",
+        GitRepositoryHint = "已根据 Git 填写仓库根目录和项目名称。",
+        GitNotRepositoryHint = "未找到 Git 仓库，将使用所选文件夹。",
+        GitUnavailableHint = "未检测到 Git，将使用所选文件夹名称。",
+        RepositoryRoot = "仓库根目录",
+        SelectedFolder = "所选文件夹",
+        UseRepositoryRoot = "使用仓库根目录",
+        RefreshGit = "刷新 Git 信息",
         StateLabels = new Dictionary<WorkflowState, string>
         {
             [WorkflowState.Idle] = "等待新任务",

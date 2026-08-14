@@ -14,6 +14,8 @@ public sealed class LocalizationTests
 
         Assert.AreEqual("等待新任务", text.GetStateLabel(WorkflowState.Idle));
         Assert.AreEqual("项目设置", text.Settings);
+        Assert.AreEqual("默认工作流", text.DefaultWorkstream);
+        Assert.AreEqual("刷新 Git 信息", text.RefreshGit);
     }
 
     [TestMethod]
@@ -23,5 +25,6 @@ public sealed class LocalizationTests
 
         Assert.AreEqual("Waiting for a new task", text.GetStateLabel(WorkflowState.Idle));
         Assert.AreEqual("Project settings", text.Settings);
+        Assert.AreEqual("Default", text.DefaultWorkstream);
     }
 }

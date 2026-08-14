@@ -38,8 +38,8 @@ public sealed class JsonStateStore : IStateStore
                 var state = await JsonSerializer.DeserializeAsync<ApplicationState>(stream, _serializerOptions, cancellationToken)
                     .ConfigureAwait(false);
                 state ??= new ApplicationState();
-                state.Projects ??= [];
-                return new StateLoadResult(state, null);
+                var wasMigrated = StateMigration.Migrate(state);
+                return new StateLoadResult(state, null, wasMigrated);
             }
             finally
             {

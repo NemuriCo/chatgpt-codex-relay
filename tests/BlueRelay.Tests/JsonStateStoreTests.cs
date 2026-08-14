@@ -34,8 +34,20 @@ public sealed class JsonStateStoreTests
         {
             Projects =
             [
-                new Project { Id = firstId, Name = "First", LocalPath = "C:\\First", CurrentState = WorkflowState.ReadyForChatGPT },
-                new Project { Id = secondId, Name = "Second", LocalPath = "C:\\Second", CurrentState = WorkflowState.CodexRunning }
+                new Project
+                {
+                    Id = firstId,
+                    Name = "First",
+                    LocalPath = "C:\\First",
+                    Workstreams = [new Workstream { Id = Guid.NewGuid(), ProjectId = firstId, Name = "First line", CurrentState = WorkflowState.ReadyForChatGPT }]
+                },
+                new Project
+                {
+                    Id = secondId,
+                    Name = "Second",
+                    LocalPath = "C:\\Second",
+                    Workstreams = [new Workstream { Id = Guid.NewGuid(), ProjectId = secondId, Name = "Second line", CurrentState = WorkflowState.CodexRunning }]
+                }
             ]
         };
 
@@ -44,8 +56,8 @@ public sealed class JsonStateStoreTests
 
         Assert.IsNull(result.Warning);
         Assert.AreEqual(2, result.State.Projects.Count);
-        Assert.AreEqual(WorkflowState.ReadyForChatGPT, result.State.Projects.Single(project => project.Id == firstId).CurrentState);
-        Assert.AreEqual(WorkflowState.CodexRunning, result.State.Projects.Single(project => project.Id == secondId).CurrentState);
+        Assert.AreEqual(WorkflowState.ReadyForChatGPT, result.State.Projects.Single(project => project.Id == firstId).Workstreams[0].CurrentState);
+        Assert.AreEqual(WorkflowState.CodexRunning, result.State.Projects.Single(project => project.Id == secondId).Workstreams[0].CurrentState);
     }
 
     [TestMethod]
@@ -56,17 +68,32 @@ public sealed class JsonStateStoreTests
         var projectId = Guid.NewGuid();
         await File.WriteAllTextAsync(
             path,
-            $$"""{"SchemaVersion":1,"Projects":[{"Id":"{{projectId}}","Name":"Legacy","LocalPath":"C:\\Legacy","CurrentState":0}],"SelectedProjectId":"{{projectId}}","IsAlwaysOnTop":false}""");
+            $$"""{"SchemaVersion":1,"Projects":[{"Id":"{{projectId}}","Name":"Legacy","LocalPath":"C:\\Legacy","CurrentState":"ReadyForCodex","ChatGPTTab":"tab-1","CodexSessionId":"session-1","CurrentTaskId":"task-1"}],"SelectedProjectId":"{{projectId}}","IsAlwaysOnTop":false}""");
 
         var result = await new JsonStateStore(path).LoadAsync();
 
         Assert.IsNull(result.Warning);
         Assert.AreEqual(1, result.State.Projects.Count);
         Assert.AreEqual(projectId, result.State.Projects[0].Id);
+        Assert.IsTrue(result.WasMigrated);
+        Assert.AreEqual(2, result.State.SchemaVersion);
+        Assert.AreEqual(1, result.State.Projects[0].Workstreams.Count);
+        Assert.AreEqual(WorkflowState.ReadyForCodex, result.State.Projects[0].Workstreams[0].CurrentState);
+        Assert.AreEqual(projectId, result.State.Projects[0].Workstreams[0].ProjectId);
+        Assert.AreEqual("tab-1", result.State.Projects[0].Workstreams[0].ChatGPTTabId);
+        Assert.AreEqual("session-1", result.State.Projects[0].Workstreams[0].CodexSessionId);
+        Assert.AreEqual("task-1", result.State.Projects[0].Workstreams[0].CurrentTaskId);
+        Assert.AreEqual(projectId, result.State.SelectedProjectId);
         Assert.IsNull(result.State.WindowLeft);
         Assert.IsNull(result.State.WindowTop);
         Assert.IsFalse(result.State.IsWindowCollapsed);
         Assert.IsFalse(result.State.IsAlwaysOnTop);
+
+        await new JsonStateStore(path).SaveAsync(result.State);
+        var migratedReload = await new JsonStateStore(path).LoadAsync();
+        Assert.IsFalse(migratedReload.WasMigrated);
+        Assert.AreEqual(2, migratedReload.State.SchemaVersion);
+        Assert.AreEqual(WorkflowState.ReadyForCodex, migratedReload.State.Projects[0].Workstreams[0].CurrentState);
     }
 
     [TestMethod]

@@ -56,18 +56,18 @@ public sealed class WorkflowStateMachine
         return from == to || AllowedTransitions.TryGetValue(from, out var allowed) && allowed.Contains(to);
     }
 
-    public bool TryTransition(Project project, WorkflowState target, bool manualOverride, out string error)
+    public bool TryTransition(Workstream workstream, WorkflowState target, bool manualOverride, out string error)
     {
-        if (!manualOverride && !CanTransition(project.CurrentState, target))
+        if (!manualOverride && !CanTransition(workstream.CurrentState, target))
         {
-            var from = WorkflowStateCatalog.Describe(project.CurrentState).Label;
+            var from = WorkflowStateCatalog.Describe(workstream.CurrentState).Label;
             var to = WorkflowStateCatalog.Describe(target).Label;
             error = $"The workflow does not allow a transition from '{from}' to '{to}'.";
             return false;
         }
 
-        project.CurrentState = target;
-        project.UpdatedAt = DateTimeOffset.UtcNow;
+        workstream.CurrentState = target;
+        workstream.UpdatedAt = DateTimeOffset.UtcNow;
         error = string.Empty;
         return true;
     }

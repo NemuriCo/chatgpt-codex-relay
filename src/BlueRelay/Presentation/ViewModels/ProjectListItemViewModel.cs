@@ -1,4 +1,3 @@
-using System.Windows.Media;
 using MediaBrush = System.Windows.Media.Brush;
 using BlueRelay.Localization;
 using BlueRelay.Models;
@@ -9,30 +8,37 @@ public sealed class ProjectListItemViewModel : ObservableObject
 {
     private readonly UiTextSet _text;
 
-    public ProjectListItemViewModel(Project project)
-        : this(project, LocalizationService.Current)
-    {
-    }
-
-    public ProjectListItemViewModel(Project project, UiTextSet text)
+    public ProjectListItemViewModel(Project project, Workstream workstream, UiTextSet text)
     {
         Project = project;
+        Workstream = workstream;
         _text = text;
     }
 
     public Project Project { get; }
 
-    public Guid Id => Project.Id;
+    public Workstream Workstream { get; }
 
-    public string Name => Project.Name;
+    public Guid Id => Workstream.Id;
+
+    public Guid ProjectId => Project.Id;
+
+    public string ProjectName => Project.Name;
+
+    public string WorkstreamName => string.Equals(Workstream.Name, BlueRelay.Models.Workstream.DefaultName, StringComparison.Ordinal)
+        ? _text.DefaultWorkstream
+        : Workstream.Name;
+
+    // Name remains a compact binding-friendly alias for the second visual line.
+    public string Name => WorkstreamName;
 
     public string LocalPath => Project.LocalPath;
 
-    public string CurrentTaskText => string.IsNullOrWhiteSpace(Project.CurrentTaskId)
+    public string CurrentTaskText => string.IsNullOrWhiteSpace(Workstream.CurrentTaskId)
         ? _text.CurrentTaskNone
-        : Project.CurrentTaskId;
+        : Workstream.CurrentTaskId;
 
-    public WorkflowState CurrentState => Project.CurrentState;
+    public WorkflowState CurrentState => Workstream.CurrentState;
 
     public string StatusLabel => WorkflowStateCatalog.Describe(CurrentState, _text).Label;
 
@@ -48,6 +54,8 @@ public sealed class ProjectListItemViewModel : ObservableObject
 
     public void Refresh()
     {
+        OnPropertyChanged(nameof(ProjectName));
+        OnPropertyChanged(nameof(WorkstreamName));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(LocalPath));
         OnPropertyChanged(nameof(CurrentTaskText));

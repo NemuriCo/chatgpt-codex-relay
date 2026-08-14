@@ -2,4 +2,4 @@ using BlueRelay.Models;
 
 namespace BlueRelay.Persistence;
 
-public sealed record StateLoadResult(ApplicationState State, string? Warning);
+public sealed record StateLoadResult(ApplicationState State, string? Warning, bool WasMigrated = false);

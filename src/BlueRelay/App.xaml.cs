@@ -1,5 +1,6 @@
 using System.Windows;
 using BlueRelay.Diagnostics;
+using BlueRelay.Localization;
 using BlueRelay.Persistence;
 using BlueRelay.Presentation.ViewModels;
 using BlueRelay.Services;
@@ -47,11 +48,11 @@ public partial class App : WpfApplication
                 new WorkflowStateMachine());
 
             var startupWarning = loadResult.Warning;
-            if (!File.Exists(stateStore.FilePath))
+            if (!File.Exists(stateStore.FilePath) || loadResult.WasMigrated)
             {
-                StartupDiagnostics.Write("Initial state save begin");
+                StartupDiagnostics.Write(loadResult.WasMigrated ? "Migrated state save begin" : "Initial state save begin");
                 var initialSaveResult = await projectService.TrySaveAsync();
-                StartupDiagnostics.Write("Initial state save complete");
+                StartupDiagnostics.Write(loadResult.WasMigrated ? "Migrated state save complete" : "Initial state save complete");
                 if (!initialSaveResult.Success)
                 {
                     startupWarning = string.IsNullOrWhiteSpace(startupWarning)
@@ -66,7 +67,8 @@ public partial class App : WpfApplication
                 loadResult.State,
                 projectService,
                 new MessageBoxDialogService(),
-                new WindowsFolderPicker(),
+                new WindowsFolderPicker(LocalizationService.Current),
+                new GitRepositoryDetector(),
                 startupWarning);
             StartupDiagnostics.Write("MainViewModel initialized");
 

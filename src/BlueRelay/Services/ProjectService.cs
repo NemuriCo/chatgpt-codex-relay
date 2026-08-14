@@ -14,6 +14,7 @@ public sealed class ProjectService
         _state = state;
         _stateStore = stateStore;
         _stateMachine = stateMachine;
+        StateMigration.Migrate(_state);
     }
 
     public event EventHandler? Changed;
@@ -31,14 +32,26 @@ public sealed class ProjectService
         }
 
         var now = DateTimeOffset.UtcNow;
+        var projectId = Guid.NewGuid();
         var project = new Project
         {
-            Id = Guid.NewGuid(),
+            Id = projectId,
             Name = validName,
             LocalPath = validPath,
             CreatedAt = now,
             UpdatedAt = now,
-            CurrentState = WorkflowState.Idle
+            Workstreams =
+            [
+                new Workstream
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    Name = Workstream.DefaultName,
+                    CurrentState = WorkflowState.Idle,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                }
+            ]
         };
 
         _state.Projects.Add(project);
@@ -120,35 +133,158 @@ public sealed class ProjectService
         return new ProjectMutationResult(true, string.Empty);
     }
 
-    public async Task<ProjectMutationResult> TryChangeStateAsync(
+    public async Task<WorkstreamMutationResult> TryCreateWorkstreamAsync(
         Guid projectId,
-        WorkflowState target,
-        bool manualOverride,
+        string name,
         CancellationToken cancellationToken = default)
     {
         var project = Find(projectId);
         if (project is null)
         {
-            return new ProjectMutationResult(false, "The selected project no longer exists.");
+            return new WorkstreamMutationResult(false, "The selected project no longer exists.");
         }
 
-        var originalState = project.CurrentState;
-        var originalUpdatedAt = project.UpdatedAt;
-        if (!_stateMachine.TryTransition(project, target, manualOverride, out var error))
+        if (!WorkstreamValidator.TryValidate(name, project.Workstreams, null, out var validName, out var error))
         {
-            return new ProjectMutationResult(false, error);
+            return new WorkstreamMutationResult(false, error);
         }
+
+        var now = DateTimeOffset.UtcNow;
+        var workstream = new Workstream
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Id,
+            Name = validName,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        project.Workstreams.Add(workstream);
+        var originalUpdatedAt = project.UpdatedAt;
+        project.UpdatedAt = now;
 
         var persistResult = await TryPersistAsync(cancellationToken);
         if (!persistResult.Success)
         {
-            project.CurrentState = originalState;
+            project.Workstreams.Remove(workstream);
             project.UpdatedAt = originalUpdatedAt;
-            return persistResult;
+            return new WorkstreamMutationResult(false, persistResult.Error);
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
-        return new ProjectMutationResult(true, string.Empty);
+        return new WorkstreamMutationResult(true, string.Empty, workstream);
+    }
+
+    public async Task<WorkstreamMutationResult> TryRenameWorkstreamAsync(
+        Guid projectId,
+        Guid workstreamId,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        var project = Find(projectId);
+        var workstream = project?.Workstreams.FirstOrDefault(item => item.Id == workstreamId);
+        if (project is null || workstream is null)
+        {
+            return new WorkstreamMutationResult(false, "The selected workstream no longer exists.");
+        }
+
+        if (!WorkstreamValidator.TryValidate(name, project.Workstreams, workstreamId, out var validName, out var error))
+        {
+            return new WorkstreamMutationResult(false, error);
+        }
+
+        var originalName = workstream.Name;
+        var originalUpdatedAt = workstream.UpdatedAt;
+        var projectUpdatedAt = project.UpdatedAt;
+        workstream.Name = validName;
+        workstream.UpdatedAt = DateTimeOffset.UtcNow;
+        project.UpdatedAt = workstream.UpdatedAt;
+
+        var persistResult = await TryPersistAsync(cancellationToken);
+        if (!persistResult.Success)
+        {
+            workstream.Name = originalName;
+            workstream.UpdatedAt = originalUpdatedAt;
+            project.UpdatedAt = projectUpdatedAt;
+            return new WorkstreamMutationResult(false, persistResult.Error);
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        return new WorkstreamMutationResult(true, string.Empty, workstream);
+    }
+
+    public async Task<WorkstreamMutationResult> TryDeleteWorkstreamAsync(
+        Guid projectId,
+        Guid workstreamId,
+        CancellationToken cancellationToken = default)
+    {
+        var project = Find(projectId);
+        if (project is null)
+        {
+            return new WorkstreamMutationResult(false, "The selected project no longer exists.");
+        }
+
+        if (project.Workstreams.Count <= 1)
+        {
+            return new WorkstreamMutationResult(false, "At least one workstream must remain in a project.");
+        }
+
+        var index = project.Workstreams.FindIndex(item => item.Id == workstreamId);
+        if (index < 0)
+        {
+            return new WorkstreamMutationResult(false, "The selected workstream no longer exists.");
+        }
+
+        var workstream = project.Workstreams[index];
+        var originalUpdatedAt = project.UpdatedAt;
+        project.Workstreams.RemoveAt(index);
+        project.UpdatedAt = DateTimeOffset.UtcNow;
+
+        var persistResult = await TryPersistAsync(cancellationToken);
+        if (!persistResult.Success)
+        {
+            project.Workstreams.Insert(index, workstream);
+            project.UpdatedAt = originalUpdatedAt;
+            return new WorkstreamMutationResult(false, persistResult.Error);
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        return new WorkstreamMutationResult(true, string.Empty);
+    }
+
+    public async Task<WorkstreamMutationResult> TryChangeStateAsync(
+        Guid projectId,
+        Guid workstreamId,
+        WorkflowState target,
+        bool manualOverride,
+        CancellationToken cancellationToken = default)
+    {
+        var project = Find(projectId);
+        var workstream = project?.Workstreams.FirstOrDefault(item => item.Id == workstreamId);
+        if (project is null || workstream is null)
+        {
+            return new WorkstreamMutationResult(false, "The selected workstream no longer exists.");
+        }
+
+        var originalState = workstream.CurrentState;
+        var originalUpdatedAt = workstream.UpdatedAt;
+        var projectUpdatedAt = project.UpdatedAt;
+        if (!_stateMachine.TryTransition(workstream, target, manualOverride, out var error))
+        {
+            return new WorkstreamMutationResult(false, error);
+        }
+
+        project.UpdatedAt = workstream.UpdatedAt;
+        var persistResult = await TryPersistAsync(cancellationToken);
+        if (!persistResult.Success)
+        {
+            workstream.CurrentState = originalState;
+            workstream.UpdatedAt = originalUpdatedAt;
+            project.UpdatedAt = projectUpdatedAt;
+            return new WorkstreamMutationResult(false, persistResult.Error);
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        return new WorkstreamMutationResult(true, string.Empty, workstream);
     }
 
     public Task<ProjectMutationResult> TrySaveAsync(CancellationToken cancellationToken = default)
@@ -159,6 +295,11 @@ public sealed class ProjectService
     public Project? Find(Guid projectId)
     {
         return _state.Projects.FirstOrDefault(project => project.Id == projectId);
+    }
+
+    public Workstream? FindWorkstream(Guid projectId, Guid workstreamId)
+    {
+        return Find(projectId)?.Workstreams.FirstOrDefault(workstream => workstream.Id == workstreamId);
     }
 
     private async Task<ProjectMutationResult> TryPersistAsync(CancellationToken cancellationToken)

@@ -13,21 +13,36 @@ public sealed class MainViewModel : ObservableObject
     private readonly ProjectService _projectService;
     private readonly IDialogService _dialogService;
     private readonly IFolderPicker _folderPicker;
+    private readonly IGitRepositoryDetector _gitRepositoryDetector;
     private readonly RelayCommand _editProjectCommand;
     private readonly RelayCommand _deleteProjectCommand;
     private readonly RelayCommand _applyStateCommand;
     private readonly RelayCommand _saveProjectCommand;
     private readonly RelayCommand _cancelEditCommand;
-    private ProjectListItemViewModel? _selectedProject;
+    private readonly RelayCommand _renameWorkstreamCommand;
+    private readonly RelayCommand _deleteWorkstreamCommand;
+    private readonly RelayCommand _saveWorkstreamCommand;
+    private readonly RelayCommand _cancelWorkstreamEditCommand;
+    private Project? _selectedProject;
+    private ProjectListItemViewModel? _selectedWorkstream;
     private WorkflowState _manualState;
     private bool _isEditing;
     private bool _isCreating;
     private bool _isAlwaysOnTop;
     private bool _isProjectManagementOpen;
+    private bool _isEditingWorkstream;
+    private bool _isCreatingWorkstream;
+    private bool _isDetectingGit;
+    private bool _useRepositoryRoot;
+    private bool _nameManuallyEdited;
+    private bool _applyingRepositorySuggestion;
     private string _editingName = string.Empty;
     private string _editingLocalPath = string.Empty;
+    private string _editingWorkstreamName = string.Empty;
+    private string _lastSuggestedName = string.Empty;
     private string? _statusMessage;
     private bool _statusIsError;
+    private GitRepositoryInfo? _repositoryInfo;
 
     public MainViewModel(
         ApplicationState state,
@@ -35,11 +50,23 @@ public sealed class MainViewModel : ObservableObject
         IDialogService dialogService,
         IFolderPicker folderPicker,
         string? loadWarning)
+        : this(state, projectService, dialogService, folderPicker, new GitRepositoryDetector(), loadWarning)
+    {
+    }
+
+    public MainViewModel(
+        ApplicationState state,
+        ProjectService projectService,
+        IDialogService dialogService,
+        IFolderPicker folderPicker,
+        IGitRepositoryDetector gitRepositoryDetector,
+        string? loadWarning)
     {
         _state = state;
         _projectService = projectService;
         _dialogService = dialogService;
         _folderPicker = folderPicker;
+        _gitRepositoryDetector = gitRepositoryDetector;
         Ui = LocalizationService.Current;
         _manualState = WorkflowState.Idle;
         _isAlwaysOnTop = state.IsAlwaysOnTop;
@@ -52,16 +79,22 @@ public sealed class MainViewModel : ObservableObject
         OpenProjectManagementCommand = new RelayCommand(OpenProjectManagement);
         CloseProjectManagementCommand = new RelayCommand(CloseProjectManagement);
         ToggleCollapsedCommand = new RelayCommand(ToggleCollapsed);
-        _editProjectCommand = new RelayCommand(StartEditProject, () => SelectedProject is not null && !IsEditing);
-        _deleteProjectCommand = new RelayCommand(DeleteSelectedProjectAsync, () => SelectedProject is not null && !IsEditing);
-        _applyStateCommand = new RelayCommand(ApplyManualStateAsync, () => SelectedProject is not null && !IsEditing);
+        NewWorkstreamCommand = new RelayCommand(StartNewWorkstream, () => SelectedProject is not null && !IsEditing && !IsEditingWorkstream);
+        _editProjectCommand = new RelayCommand(StartEditProject, () => SelectedProject is not null && !IsEditing && !IsEditingWorkstream);
+        _deleteProjectCommand = new RelayCommand(DeleteSelectedProjectAsync, () => SelectedProject is not null && !IsEditing && !IsEditingWorkstream);
+        _applyStateCommand = new RelayCommand(ApplyManualStateAsync, () => SelectedWorkstream is not null && !IsEditing && !IsEditingWorkstream);
         _saveProjectCommand = new RelayCommand(SaveProjectAsync, () => IsEditing);
         _cancelEditCommand = new RelayCommand(CancelEdit, () => IsEditing);
-        BrowsePathCommand = new RelayCommand(BrowseForProjectDirectory, () => IsEditing);
-        ToggleAlwaysOnTopCommand = new RelayCommand(ToggleAlwaysOnTopAsync, () => !IsEditing);
+        _renameWorkstreamCommand = new RelayCommand(StartRenameWorkstream, () => SelectedWorkstream is not null && !IsEditing && !IsEditingWorkstream);
+        _deleteWorkstreamCommand = new RelayCommand(DeleteSelectedWorkstreamAsync, () => SelectedWorkstream is not null && !IsEditing && !IsEditingWorkstream);
+        _saveWorkstreamCommand = new RelayCommand(SaveWorkstreamAsync, () => IsEditingWorkstream);
+        _cancelWorkstreamEditCommand = new RelayCommand(CancelWorkstreamEdit, () => IsEditingWorkstream);
+        BrowsePathCommand = new RelayCommand(BrowseForProjectDirectoryAsync, () => IsEditing && !IsDetectingGit);
+        RefreshRepositoryCommand = new RelayCommand(RefreshRepositoryAsync, () => IsEditing && !IsDetectingGit && !string.IsNullOrWhiteSpace(EditingLocalPath));
+        ToggleAlwaysOnTopCommand = new RelayCommand(ToggleAlwaysOnTopAsync, () => !IsEditing && !IsEditingWorkstream);
 
         _projectService.Changed += ProjectService_Changed;
-        RefreshProjects(_state.SelectedProjectId);
+        RefreshData(_state.SelectedProjectId, null);
         if (!string.IsNullOrWhiteSpace(loadWarning))
         {
             SetStatus(loadWarning, isError: true);
@@ -70,7 +103,11 @@ public sealed class MainViewModel : ObservableObject
 
     public UiTextSet Ui { get; }
 
-    public ObservableCollection<ProjectListItemViewModel> Projects { get; } = [];
+    public ObservableCollection<Project> Projects { get; } = [];
+
+    public ObservableCollection<ProjectListItemViewModel> Workstreams { get; } = [];
+
+    public ObservableCollection<ProjectListItemViewModel> SelectedProjectWorkstreams { get; } = [];
 
     public IReadOnlyList<StateOption> StateOptions { get; }
 
@@ -82,6 +119,8 @@ public sealed class MainViewModel : ObservableObject
 
     public ICommand ToggleCollapsedCommand { get; }
 
+    public ICommand NewWorkstreamCommand { get; }
+
     public ICommand EditProjectCommand => _editProjectCommand;
 
     public ICommand DeleteProjectCommand => _deleteProjectCommand;
@@ -92,31 +131,71 @@ public sealed class MainViewModel : ObservableObject
 
     public ICommand CancelEditCommand => _cancelEditCommand;
 
+    public ICommand RenameWorkstreamCommand => _renameWorkstreamCommand;
+
+    public ICommand DeleteWorkstreamCommand => _deleteWorkstreamCommand;
+
+    public ICommand SaveWorkstreamCommand => _saveWorkstreamCommand;
+
+    public ICommand CancelWorkstreamEditCommand => _cancelWorkstreamEditCommand;
+
     public ICommand BrowsePathCommand { get; }
+
+    public ICommand RefreshRepositoryCommand { get; }
 
     public ICommand ToggleAlwaysOnTopCommand { get; }
 
-    public ProjectListItemViewModel? SelectedProject
+    public Project? SelectedProject
     {
         get => _selectedProject;
         set
         {
-            if (!SetProperty(ref _selectedProject, value) || value is null)
+            if (!SetProperty(ref _selectedProject, value))
             {
-                if (value is null)
-                {
-                    _state.SelectedProjectId = null;
-                    _ = PersistSelectionAsync();
-                }
-
-                RaiseCommandStates();
                 return;
             }
 
-            _state.SelectedProjectId = value.Id;
+            _state.SelectedProjectId = value?.Id;
             _ = PersistSelectionAsync();
-            ManualState = value.CurrentState;
+            OnPropertyChanged(nameof(HasDetails));
+            RefreshWorkstreams(null);
             RaiseCommandStates();
+        }
+    }
+
+    public ProjectListItemViewModel? SelectedWorkstream
+    {
+        get => _selectedWorkstream;
+        set
+        {
+            if (value is not null && !ReferenceEquals(SelectedProject, value.Project))
+            {
+                var workstreamId = value.Id;
+                SelectedProject = value.Project;
+                value = Workstreams.FirstOrDefault(workstream => workstream.Id == workstreamId);
+            }
+
+            if (!SetProperty(ref _selectedWorkstream, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(SelectedWorkstreamModel));
+
+            ManualState = value?.CurrentState ?? WorkflowState.Idle;
+            RaiseCommandStates();
+        }
+    }
+
+    public Workstream? SelectedWorkstreamModel
+    {
+        get => SelectedWorkstream?.Workstream;
+        set
+        {
+            var item = value is null
+                ? null
+                : Workstreams.FirstOrDefault(workstream => ReferenceEquals(workstream.Workstream, value) || workstream.Id == value.Id);
+            SelectedWorkstream = item;
         }
     }
 
@@ -140,10 +219,90 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public bool IsEditingWorkstream
+    {
+        get => _isEditingWorkstream;
+        private set
+        {
+            if (SetProperty(ref _isEditingWorkstream, value))
+            {
+                OnPropertyChanged(nameof(IsProjectListEnabled));
+                RaiseCommandStates();
+            }
+        }
+    }
+
     public bool IsProjectManagementOpen
     {
         get => _isProjectManagementOpen;
         private set => SetProperty(ref _isProjectManagementOpen, value);
+    }
+
+    public bool IsDetectingGit
+    {
+        get => _isDetectingGit;
+        private set
+        {
+            if (SetProperty(ref _isDetectingGit, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public GitRepositoryInfo? RepositoryInfo
+    {
+        get => _repositoryInfo;
+        private set
+        {
+            if (SetProperty(ref _repositoryInfo, value))
+            {
+                OnPropertyChanged(nameof(HasRepositoryInfo));
+                OnPropertyChanged(nameof(HasAlternativeRepositoryRoot));
+                OnPropertyChanged(nameof(HasRepositoryRoot));
+                OnPropertyChanged(nameof(GitInfoTitle));
+                OnPropertyChanged(nameof(GitInfoMessage));
+                OnPropertyChanged(nameof(SelectedFolderText));
+                OnPropertyChanged(nameof(RepositoryRootText));
+            }
+        }
+    }
+
+    public bool HasRepositoryInfo => RepositoryInfo is not null;
+
+    public bool HasAlternativeRepositoryRoot => RepositoryInfo?.IsGitRepository == true &&
+                                                !PathsEqual(RepositoryInfo.SelectedPath, RepositoryInfo.RepositoryRoot);
+
+    public bool HasRepositoryRoot => !string.IsNullOrWhiteSpace(RepositoryInfo?.RepositoryRoot);
+
+    public string GitInfoTitle => RepositoryInfo is null
+        ? string.Empty
+        : RepositoryInfo.IsGitRepository
+            ? Ui.GitDetected
+            : RepositoryInfo.GitAvailable ? Ui.GitNotDetected : Ui.GitUnavailable;
+
+    public string GitInfoMessage => RepositoryInfo is null
+        ? string.Empty
+        : RepositoryInfo.IsGitRepository
+            ? Ui.GitRepositoryHint
+            : RepositoryInfo.GitAvailable ? Ui.GitNotRepositoryHint : Ui.GitUnavailableHint;
+
+    public string RepositoryRootText => RepositoryInfo?.RepositoryRoot ?? string.Empty;
+
+    public string SelectedFolderText => RepositoryInfo?.SelectedPath ?? string.Empty;
+
+    public bool UseRepositoryRoot
+    {
+        get => _useRepositoryRoot;
+        set
+        {
+            if (!SetProperty(ref _useRepositoryRoot, value) || RepositoryInfo?.RepositoryRoot is null)
+            {
+                return;
+            }
+
+            EditingLocalPath = value ? RepositoryInfo.RepositoryRoot : RepositoryInfo.SelectedPath;
+        }
     }
 
     public bool IsCollapsed => _state.IsWindowCollapsed;
@@ -162,7 +321,9 @@ public sealed class MainViewModel : ObservableObject
 
     public bool HasProjects => Projects.Count > 0;
 
-    public bool IsProjectListEnabled => !IsEditing;
+    public bool HasWorkstreams => Workstreams.Count > 0;
+
+    public bool IsProjectListEnabled => !IsEditing && !IsEditingWorkstream;
 
     public bool IsAlwaysOnTop
     {
@@ -179,13 +340,25 @@ public sealed class MainViewModel : ObservableObject
     public string EditingName
     {
         get => _editingName;
-        set => SetProperty(ref _editingName, value);
+        set
+        {
+            if (SetProperty(ref _editingName, value) && !_applyingRepositorySuggestion)
+            {
+                _nameManuallyEdited = true;
+            }
+        }
     }
 
     public string EditingLocalPath
     {
         get => _editingLocalPath;
         set => SetProperty(ref _editingLocalPath, value);
+    }
+
+    public string EditingWorkstreamName
+    {
+        get => _editingWorkstreamName;
+        set => SetProperty(ref _editingWorkstreamName, value);
     }
 
     public string? StatusMessage
@@ -275,6 +448,11 @@ public sealed class MainViewModel : ObservableObject
             CancelEdit();
         }
 
+        if (IsEditingWorkstream)
+        {
+            CancelWorkstreamEdit();
+        }
+
         IsProjectManagementOpen = false;
     }
 
@@ -282,9 +460,10 @@ public sealed class MainViewModel : ObservableObject
     {
         _isCreating = true;
         SelectedProject = null;
-        EditingName = string.Empty;
+        SelectedWorkstream = null;
+        SetEditingName(string.Empty, manuallyEdited: false);
         EditingLocalPath = string.Empty;
-        ManualState = WorkflowState.Idle;
+        ClearRepositoryInfo();
         IsProjectManagementOpen = true;
         IsEditing = true;
         SetStatus(Ui.CreateProjectHint);
@@ -298,12 +477,37 @@ public sealed class MainViewModel : ObservableObject
         }
 
         _isCreating = false;
-        EditingName = SelectedProject.Name;
+        SetEditingName(SelectedProject.Name, manuallyEdited: true);
         EditingLocalPath = SelectedProject.LocalPath;
-        ManualState = SelectedProject.CurrentState;
+        ClearRepositoryInfo();
         IsProjectManagementOpen = true;
         IsEditing = true;
         SetStatus(Ui.EditProjectHint);
+    }
+
+    private void StartNewWorkstream()
+    {
+        if (SelectedProject is null)
+        {
+            return;
+        }
+
+        _isCreatingWorkstream = true;
+        EditingWorkstreamName = Ui.NewWorkstream;
+        IsEditingWorkstream = true;
+        RaiseCommandStates();
+    }
+
+    private void StartRenameWorkstream()
+    {
+        if (SelectedWorkstream is null)
+        {
+            return;
+        }
+
+        _isCreatingWorkstream = false;
+        EditingWorkstreamName = SelectedWorkstream.Workstream.Name;
+        IsEditingWorkstream = true;
     }
 
     private async Task SaveProjectAsync()
@@ -319,7 +523,7 @@ public sealed class MainViewModel : ObservableObject
 
             IsEditing = false;
             _isCreating = false;
-            RefreshProjects(createResult.Project!.Id);
+            RefreshData(createResult.Project!.Id, createResult.Project.Workstreams[0].Id);
             SetStatus(Ui.ProjectCreated);
             return;
         }
@@ -336,9 +540,10 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var selectedId = SelectedProject.Id;
+        var selectedProjectId = SelectedProject.Id;
+        var selectedWorkstreamId = SelectedWorkstream?.Id;
         IsEditing = false;
-        RefreshProjects(selectedId);
+        RefreshData(selectedProjectId, selectedWorkstreamId);
         SetStatus(Ui.ProjectUpdated);
     }
 
@@ -346,16 +551,54 @@ public sealed class MainViewModel : ObservableObject
     {
         _isCreating = false;
         IsEditing = false;
-        RefreshProjects(_state.SelectedProjectId);
+        ClearRepositoryInfo();
+        RefreshData(_state.SelectedProjectId, SelectedWorkstream?.Id);
         SetStatus(Ui.ChangesDiscarded);
     }
 
-    private void BrowseForProjectDirectory()
+    private async Task BrowseForProjectDirectoryAsync()
     {
         var selectedPath = _folderPicker.Pick(EditingLocalPath);
-        if (!string.IsNullOrWhiteSpace(selectedPath))
+        if (string.IsNullOrWhiteSpace(selectedPath))
         {
-            EditingLocalPath = selectedPath;
+            return;
+        }
+
+        EditingLocalPath = selectedPath;
+        await DetectGitAsync(selectedPath);
+    }
+
+    private Task RefreshRepositoryAsync()
+    {
+        return DetectGitAsync(EditingLocalPath);
+    }
+
+    private async Task DetectGitAsync(string selectedPath)
+    {
+        IsDetectingGit = true;
+        try
+        {
+            var info = await _gitRepositoryDetector.DetectAsync(selectedPath);
+            RepositoryInfo = info;
+            _useRepositoryRoot = info.IsGitRepository && HasAlternativeRoot(info);
+            OnPropertyChanged(nameof(UseRepositoryRoot));
+            SetEditingNameFromSuggestion(info.SuggestedName);
+            EditingLocalPath = _useRepositoryRoot && info.RepositoryRoot is not null
+                ? info.RepositoryRoot
+                : info.SelectedPath;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            ClearRepositoryInfo();
+            SetStatus($"{Ui.GitUnavailable}: {exception.Message}", isError: true);
+        }
+        finally
+        {
+            IsDetectingGit = false;
         }
     }
 
@@ -366,7 +609,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var project = SelectedProject.Project;
+        var project = SelectedProject;
         var confirmed = _dialogService.Confirm(
             Ui.DeleteProjectTitle,
             string.Format(Ui.DeleteProjectMessageFormat, project.Name));
@@ -382,19 +625,20 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        RefreshProjects(_state.SelectedProjectId);
+        RefreshData(_state.SelectedProjectId, null);
         SetStatus(Ui.ProjectDeleted);
     }
 
     private async Task ApplyManualStateAsync()
     {
-        if (SelectedProject is null)
+        if (SelectedWorkstream is null)
         {
             return;
         }
 
         var changeResult = await _projectService.TryChangeStateAsync(
-            SelectedProject.Id,
+            SelectedWorkstream.ProjectId,
+            SelectedWorkstream.Id,
             ManualState,
             manualOverride: true);
         if (!changeResult.Success)
@@ -403,39 +647,199 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        RefreshProjects(SelectedProject.Id);
+        RefreshData(SelectedWorkstream.ProjectId, SelectedWorkstream.Id);
         SetStatus(Ui.WorkflowUpdated);
+    }
+
+    private async Task SaveWorkstreamAsync()
+    {
+        if (SelectedProject is null)
+        {
+            return;
+        }
+
+        var isCreating = _isCreatingWorkstream;
+        WorkstreamMutationResult result;
+        if (isCreating)
+        {
+            result = await _projectService.TryCreateWorkstreamAsync(SelectedProject.Id, EditingWorkstreamName);
+        }
+        else if (SelectedWorkstream is not null)
+        {
+            result = await _projectService.TryRenameWorkstreamAsync(
+                SelectedProject.Id,
+                SelectedWorkstream.Id,
+                EditingWorkstreamName);
+        }
+        else
+        {
+            return;
+        }
+
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        var workstreamId = result.Workstream?.Id;
+        IsEditingWorkstream = false;
+        _isCreatingWorkstream = false;
+        RefreshData(SelectedProject.Id, workstreamId);
+        SetStatus(isCreating ? Ui.WorkstreamCreated : Ui.WorkstreamUpdated);
+    }
+
+    private void CancelWorkstreamEdit()
+    {
+        _isCreatingWorkstream = false;
+        IsEditingWorkstream = false;
+        SetStatus(Ui.ChangesDiscarded);
+    }
+
+    private async Task DeleteSelectedWorkstreamAsync()
+    {
+        if (SelectedProject is null || SelectedWorkstream is null)
+        {
+            return;
+        }
+
+        if (SelectedProject.Workstreams.Count <= 1)
+        {
+            SetStatus(Ui.LastWorkstreamRequired, isError: true);
+            return;
+        }
+
+        var workstream = SelectedWorkstream.Workstream;
+        var confirmed = _dialogService.Confirm(
+            Ui.DeleteWorkstreamTitle,
+            string.Format(Ui.DeleteWorkstreamMessageFormat, workstream.Name));
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var deleteResult = await _projectService.TryDeleteWorkstreamAsync(SelectedProject.Id, workstream.Id);
+        if (!deleteResult.Success)
+        {
+            SetStatus(deleteResult.Error, isError: true);
+            return;
+        }
+
+        RefreshData(SelectedProject.Id, null);
+        SetStatus(Ui.WorkstreamDeleted);
     }
 
     private void ProjectService_Changed(object? sender, EventArgs e)
     {
-        RefreshProjects(_state.SelectedProjectId);
+        RefreshData(_state.SelectedProjectId, SelectedWorkstream?.Id);
     }
 
-    private void RefreshProjects(Guid? preferredProjectId)
+    private void RefreshData(Guid? preferredProjectId, Guid? preferredWorkstreamId)
     {
-        var selectedId = preferredProjectId;
         Projects.Clear();
         foreach (var project in _state.Projects.OrderByDescending(project => project.UpdatedAt))
         {
-            Projects.Add(new ProjectListItemViewModel(project, Ui));
+            Projects.Add(project);
         }
 
         OnPropertyChanged(nameof(HasProjects));
-        var nextSelection = selectedId.HasValue
-            ? Projects.FirstOrDefault(project => project.Id == selectedId.Value)
+        var nextProject = preferredProjectId.HasValue
+            ? Projects.FirstOrDefault(project => project.Id == preferredProjectId.Value)
             : null;
-        nextSelection ??= Projects.FirstOrDefault();
-        if (!ReferenceEquals(_selectedProject, nextSelection))
+        nextProject ??= Projects.FirstOrDefault();
+        if (!ReferenceEquals(_selectedProject, nextProject))
         {
-            SelectedProject = nextSelection;
+            SelectedProject = nextProject;
         }
-        else if (nextSelection is not null)
+        else
         {
-            nextSelection.Refresh();
+            RefreshWorkstreams(preferredWorkstreamId);
+        }
+    }
+
+    private void RefreshWorkstreams(Guid? preferredWorkstreamId)
+    {
+        Workstreams.Clear();
+        SelectedProjectWorkstreams.Clear();
+        foreach (var project in _state.Projects)
+        {
+            foreach (var workstream in project.Workstreams.OrderByDescending(workstream => workstream.UpdatedAt))
+            {
+                var item = new ProjectListItemViewModel(project, workstream, Ui);
+                Workstreams.Add(item);
+                if (SelectedProject is not null && project.Id == SelectedProject.Id)
+                {
+                    SelectedProjectWorkstreams.Add(item);
+                }
+            }
+        }
+
+        OnPropertyChanged(nameof(HasWorkstreams));
+        var nextWorkstream = preferredWorkstreamId.HasValue
+            ? Workstreams.FirstOrDefault(workstream => workstream.Id == preferredWorkstreamId.Value)
+            : SelectedProjectWorkstreams.FirstOrDefault();
+        nextWorkstream ??= Workstreams.FirstOrDefault();
+        if (!ReferenceEquals(_selectedWorkstream, nextWorkstream))
+        {
+            SelectedWorkstream = nextWorkstream;
+        }
+        else if (nextWorkstream is not null)
+        {
+            nextWorkstream.Refresh();
         }
 
         RaiseCommandStates();
+    }
+
+    private void SetEditingName(string value, bool manuallyEdited)
+    {
+        _nameManuallyEdited = manuallyEdited;
+        _applyingRepositorySuggestion = true;
+        try
+        {
+            EditingName = value;
+        }
+        finally
+        {
+            _applyingRepositorySuggestion = false;
+        }
+    }
+
+    private void SetEditingNameFromSuggestion(string suggestedName)
+    {
+        _lastSuggestedName = suggestedName;
+        if (_nameManuallyEdited && !string.IsNullOrWhiteSpace(EditingName))
+        {
+            return;
+        }
+
+        SetEditingName(suggestedName, manuallyEdited: false);
+    }
+
+    private void ClearRepositoryInfo()
+    {
+        RepositoryInfo = null;
+        _useRepositoryRoot = false;
+        _lastSuggestedName = string.Empty;
+        OnPropertyChanged(nameof(UseRepositoryRoot));
+    }
+
+    private static bool HasAlternativeRoot(GitRepositoryInfo info)
+    {
+        return info.RepositoryRoot is not null && !PathsEqual(info.SelectedPath, info.RepositoryRoot);
+    }
+
+    private static bool PathsEqual(string? first, string? second)
+    {
+        if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(second))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            Path.GetFullPath(first).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(second).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private void SetStatus(string message, bool isError = false)
@@ -460,9 +864,23 @@ public sealed class MainViewModel : ObservableObject
         _applyStateCommand.RaiseCanExecuteChanged();
         _saveProjectCommand.RaiseCanExecuteChanged();
         _cancelEditCommand.RaiseCanExecuteChanged();
+        _renameWorkstreamCommand.RaiseCanExecuteChanged();
+        _deleteWorkstreamCommand.RaiseCanExecuteChanged();
+        _saveWorkstreamCommand.RaiseCanExecuteChanged();
+        _cancelWorkstreamEditCommand.RaiseCanExecuteChanged();
         if (BrowsePathCommand is RelayCommand browseCommand)
         {
             browseCommand.RaiseCanExecuteChanged();
+        }
+
+        if (RefreshRepositoryCommand is RelayCommand refreshCommand)
+        {
+            refreshCommand.RaiseCanExecuteChanged();
+        }
+
+        if (NewWorkstreamCommand is RelayCommand newWorkstreamCommand)
+        {
+            newWorkstreamCommand.RaiseCanExecuteChanged();
         }
     }
 }

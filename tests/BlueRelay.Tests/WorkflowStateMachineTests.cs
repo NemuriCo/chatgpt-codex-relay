@@ -28,10 +28,10 @@ public sealed class WorkflowStateMachineTests
     [TestMethod]
     public void ManualOverrideCanSetAnyStateForMvpTesting()
     {
-        var project = new Project { Id = Guid.NewGuid(), Name = "Test", LocalPath = "C:\\" };
+        var workstream = new Workstream { Id = Guid.NewGuid(), ProjectId = Guid.NewGuid(), Name = "Test" };
 
-        Assert.IsTrue(_machine.TryTransition(project, WorkflowState.Completed, manualOverride: true, out var error));
+        Assert.IsTrue(_machine.TryTransition(workstream, WorkflowState.Completed, manualOverride: true, out var error));
         Assert.AreEqual(string.Empty, error);
-        Assert.AreEqual(WorkflowState.Completed, project.CurrentState);
+        Assert.AreEqual(WorkflowState.Completed, workstream.CurrentState);
     }
 }

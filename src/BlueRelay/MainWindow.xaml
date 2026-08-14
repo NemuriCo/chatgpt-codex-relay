@@ -131,12 +131,12 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Ellipse Width="7" Height="7" Fill="{Binding SelectedProject.StatusBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Ellipse Width="7" Height="7" Fill="{Binding SelectedWorkstream.StatusBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding SelectedProject.Name, TargetNullValue=BlueRelay}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding SelectedWorkstream.ProjectName, TargetNullValue=BlueRelay}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding SelectedProject.StatusLabel}" Foreground="#AAB2BF" FontSize="10" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Text="{Binding SelectedProject.PendingLabel}" Foreground="#F1C75B" FontSize="9" Margin="8,0,0,0" />
+                            <TextBlock Text="{Binding SelectedWorkstream.WorkstreamName}" Foreground="#AAB2BF" FontSize="10" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding SelectedWorkstream.StatusLabel}" Foreground="#F1C75B" FontSize="9" Margin="8,0,0,0" />
                         </StackPanel>
                     </StackPanel>
                     <Button Grid.Column="2"
@@ -188,34 +188,36 @@
                                 <Button Grid.Column="1" Content="{Binding Ui.Settings}" Command="{Binding OpenProjectManagementCommand}" Margin="8,0,0,0" />
                             </Grid>
 
-                            <Border Background="#1D2630" BorderBrush="#304052" BorderThickness="1" CornerRadius="10" Padding="12" Visibility="{Binding HasProjects, Converter={StaticResource BoolToVisibility}}">
+                            <Border Background="#1D2630" BorderBrush="#304052" BorderThickness="1" CornerRadius="10" Padding="12" Visibility="{Binding HasWorkstreams, Converter={StaticResource BoolToVisibility}}">
                                 <Grid>
                                     <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <Grid>
                                         <StackPanel>
-                                            <TextBlock Text="{Binding SelectedProject.Name}" FontSize="15" FontWeight="SemiBold" />
-                                            <TextBlock Text="{Binding SelectedProject.StatusLabel}" Foreground="{Binding SelectedProject.StatusBrush}" FontSize="11" Margin="0,3,0,0" />
+                                            <TextBlock Text="{Binding SelectedWorkstream.ProjectName}" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding SelectedWorkstream.WorkstreamName}" Foreground="#AAB2BF" FontSize="10" Margin="0,3,0,0" />
+                                            <TextBlock Text="{Binding SelectedWorkstream.StatusLabel}" Foreground="{Binding SelectedWorkstream.StatusBrush}" FontSize="11" Margin="0,2,0,0" />
                                         </StackPanel>
-                                        <TextBlock Text="{Binding SelectedProject.StatusMarker}" Foreground="{Binding SelectedProject.StatusBrush}" FontSize="20" HorizontalAlignment="Right" />
+                                        <TextBlock Text="{Binding SelectedWorkstream.StatusMarker}" Foreground="{Binding SelectedWorkstream.StatusBrush}" FontSize="20" HorizontalAlignment="Right" />
                                     </Grid>
-                                    <TextBlock Grid.Row="1" Text="{Binding SelectedProject.Guidance}" Foreground="#CDD4DE" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="1" Text="{Binding SelectedWorkstream.Guidance}" Foreground="#CDD4DE" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0" />
                                     <Grid Grid.Row="2" Margin="0,10,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="{Binding Ui.NextAction}" Foreground="#8993A3" FontSize="10" />
-                                        <TextBlock Grid.Column="1" Text="{Binding SelectedProject.StatusLabel}" Foreground="#F4F5F7" FontSize="10" Margin="8,0,0,0" />
+                                        <TextBlock Grid.Column="1" Text="{Binding SelectedWorkstream.Guidance}" Foreground="#F4F5F7" FontSize="10" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
                                     </Grid>
                                 </Grid>
                             </Border>
 
-                            <Border Background="#1B1F26" BorderBrush="#2D3642" BorderThickness="1" CornerRadius="10" Padding="8" Margin="0,10,0,0" Visibility="{Binding HasProjects, Converter={StaticResource BoolToVisibility}}">
-                                <ListBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject, Mode=TwoWay}" MaxHeight="142">
+                            <Border Background="#1B1F26" BorderBrush="#2D3642" BorderThickness="1" CornerRadius="10" Padding="8" Margin="0,10,0,0" Visibility="{Binding HasWorkstreams, Converter={StaticResource BoolToVisibility}}">
+                                <ListBox ItemsSource="{Binding Workstreams}" SelectedItem="{Binding SelectedWorkstream, Mode=TwoWay}" MaxHeight="142">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <Grid Margin="0,1,0,1">
@@ -226,8 +228,9 @@
                                                 </Grid.ColumnDefinitions>
                                                 <Ellipse Width="7" Height="7" Fill="{Binding StatusBrush}" VerticalAlignment="Top" Margin="0,5,8,0" />
                                                 <StackPanel Grid.Column="1">
-                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{Binding Guidance}" Foreground="#9BA5B4" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding ProjectName}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding WorkstreamName}" Foreground="#AAB2BF" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding Guidance}" Foreground="#9BA5B4" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="2" HorizontalAlignment="Right">
                                                     <TextBlock Text="{Binding StatusMarker}" Foreground="{Binding StatusBrush}" FontSize="15" HorizontalAlignment="Right" />
@@ -239,7 +242,7 @@
                                 </ListBox>
                             </Border>
 
-                            <Border Background="#1B1F26" BorderBrush="#2D3642" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,10,0,0" Visibility="{Binding HasProjects, Converter={StaticResource InverseBoolToVisibility}}">
+                            <Border Background="#1B1F26" BorderBrush="#2D3642" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,10,0,0" Visibility="{Binding HasWorkstreams, Converter={StaticResource InverseBoolToVisibility}}">
                                 <StackPanel HorizontalAlignment="Center">
                                     <TextBlock Text="{Binding Ui.EmptyTitle}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" />
                                     <TextBlock Text="{Binding Ui.EmptyDescription}" Foreground="#9BA5B4" FontSize="11" TextWrapping="Wrap" TextAlignment="Center" Margin="0,5,0,10" />
@@ -286,11 +289,34 @@
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBox Grid.Column="0" Text="{Binding EditingLocalPath, UpdateSourceTrigger=PropertyChanged}" />
                                         <Button Grid.Column="1" Content="{Binding Ui.Browse}" Command="{Binding BrowsePathCommand}" Margin="6,0,0,0" />
+                                        <Button Grid.Column="2" Content="{Binding Ui.RefreshGit}" Command="{Binding RefreshRepositoryCommand}" Margin="6,0,0,0" />
                                     </Grid>
-                                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,11,0,0">
+                                    <Border Grid.Row="2" Background="#202A32" BorderBrush="#34505A" BorderThickness="1" CornerRadius="7" Padding="8" Margin="0,9,0,0" Visibility="{Binding HasRepositoryInfo, Converter={StaticResource BoolToVisibility}}">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding GitInfoTitle}" Foreground="#8FD5C5" FontSize="10" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding GitInfoMessage}" Foreground="#C7D3D7" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0" />
+                                            <Grid Margin="0,7,0,0">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Ui.SelectedFolder}" Foreground="#8993A3" FontSize="9" />
+                                                <TextBlock Grid.Column="1" Text="{Binding SelectedFolderText}" Foreground="#D7DBE2" FontSize="9" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Row="1" Text="{Binding Ui.RepositoryRoot}" Foreground="#8993A3" FontSize="9" Margin="0,4,0,0" Visibility="{Binding HasRepositoryRoot, Converter={StaticResource BoolToVisibility}}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding RepositoryRootText}" Foreground="#D7DBE2" FontSize="9" Margin="8,4,0,0" TextTrimming="CharacterEllipsis" Visibility="{Binding HasRepositoryRoot, Converter={StaticResource BoolToVisibility}}" />
+                                            </Grid>
+                                            <CheckBox Content="{Binding Ui.UseRepositoryRoot}" IsChecked="{Binding UseRepositoryRoot, Mode=TwoWay}" Foreground="#D7DBE2" FontSize="10" Margin="0,7,0,0" Visibility="{Binding HasAlternativeRepositoryRoot, Converter={StaticResource BoolToVisibility}}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,11,0,0">
                                         <Button Content="{Binding Ui.Cancel}" Command="{Binding CancelEditCommand}" />
                                         <Button Content="{Binding Ui.SaveProject}" Command="{Binding SaveProjectCommand}" Background="#2C8B75" BorderBrush="#3BAA90" />
                                     </StackPanel>
@@ -303,53 +329,79 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
-                                <ListBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject, Mode=TwoWay}" MaxHeight="112">
+                                <ListBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject, Mode=TwoWay}" MaxHeight="112" IsEnabled="{Binding IsProjectListEnabled}">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" Foreground="{Binding StatusBrush}" FontSize="10" Margin="8,0,0,0" />
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding LocalPath}" Foreground="#8993A3" FontSize="9" TextTrimming="CharacterEllipsis" Margin="0,16,0,0" />
                                             </Grid>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>
                                 <Button Grid.Row="1" Content="{Binding Ui.NewProject}" Command="{Binding NewProjectCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
-                                <Grid Grid.Row="2" Margin="0,10,0,0" Visibility="{Binding HasDetails, Converter={StaticResource BoolToVisibility}}">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <Grid>
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding SelectedProject.Name}" FontSize="13" FontWeight="SemiBold" />
-                                            <TextBlock Text="{Binding SelectedProject.LocalPath}" Foreground="#9BA5B4" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
-                                        </StackPanel>
-                                        <TextBlock Text="{Binding SelectedProject.StatusLabel}" Foreground="{Binding SelectedProject.StatusBrush}" FontSize="10" HorizontalAlignment="Right" />
-                                    </Grid>
-                                    <Grid Grid.Row="1" Margin="0,8,0,0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Ui.CurrentTask}" Foreground="#8993A3" FontSize="10" />
-                                        <TextBlock Grid.Column="1" Text="{Binding SelectedProject.CurrentTaskText}" Foreground="#D7DBE2" FontSize="10" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
-                                    </Grid>
-                                    <Grid Grid.Row="2" Margin="0,10,0,0">
-                                        <StackPanel Orientation="Horizontal">
-                                            <Button Content="{Binding Ui.Edit}" Command="{Binding EditProjectCommand}" />
-                                            <Button Content="{Binding Ui.Delete}" Command="{Binding DeleteProjectCommand}" Background="#3A252A" BorderBrush="#70404B" />
-                                        </StackPanel>
-                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                            <ComboBox Width="145" ItemsSource="{Binding StateOptions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ManualState, Mode=TwoWay}" />
-                                            <Button Content="{Binding Ui.ApplyState}" Command="{Binding ApplyStateCommand}" Background="#2C8B75" BorderBrush="#3BAA90" Margin="6,0,0,0" />
+                                <StackPanel Grid.Row="2" Margin="0,10,0,0" Visibility="{Binding HasDetails, Converter={StaticResource BoolToVisibility}}">
+                                    <Grid Visibility="{Binding IsEditingWorkstream, Converter={StaticResource BoolToVisibility}}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="{Binding Ui.WorkstreamName}" FontSize="13" FontWeight="SemiBold" />
+                                        <TextBox Grid.Row="1" Text="{Binding EditingWorkstreamName, UpdateSourceTrigger=PropertyChanged}" Margin="0,8,0,0" />
+                                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                                            <Button Content="{Binding Ui.Cancel}" Command="{Binding CancelWorkstreamEditCommand}" />
+                                            <Button Content="{Binding Ui.SaveWorkstream}" Command="{Binding SaveWorkstreamCommand}" Background="#2C8B75" BorderBrush="#3BAA90" />
                                         </StackPanel>
                                     </Grid>
-                                </Grid>
+
+                                    <StackPanel Visibility="{Binding IsEditingWorkstream, Converter={StaticResource InverseBoolToVisibility}}">
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding SelectedProject.Name}" FontSize="13" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding SelectedProject.LocalPath}" Foreground="#9BA5B4" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
+                                            </StackPanel>
+                                            <StackPanel HorizontalAlignment="Right">
+                                                <Button Content="{Binding Ui.Edit}" Command="{Binding EditProjectCommand}" HorizontalAlignment="Right" />
+                                                <Button Content="{Binding Ui.Delete}" Command="{Binding DeleteProjectCommand}" Background="#3A252A" BorderBrush="#70404B" Margin="0,5,0,0" HorizontalAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Text="{Binding Ui.WorkstreamManagement}" FontSize="12" FontWeight="SemiBold" Margin="0,12,0,5" />
+                                        <ListBox ItemsSource="{Binding SelectedProjectWorkstreams}" SelectedItem="{Binding SelectedWorkstream, Mode=TwoWay}" MaxHeight="100">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding WorkstreamName}" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" Foreground="{Binding StatusBrush}" FontSize="9" Margin="8,0,0,0" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                            <Button Content="{Binding Ui.NewWorkstream}" Command="{Binding NewWorkstreamCommand}" />
+                                            <Button Content="{Binding Ui.RenameWorkstream}" Command="{Binding RenameWorkstreamCommand}" />
+                                            <Button Content="{Binding Ui.DeleteWorkstream}" Command="{Binding DeleteWorkstreamCommand}" Background="#3A252A" BorderBrush="#70404B" />
+                                        </StackPanel>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding SelectedWorkstream.WorkstreamName}" FontSize="11" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding SelectedWorkstream.CurrentTaskText}" Foreground="#8993A3" FontSize="9" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <ComboBox Width="145" ItemsSource="{Binding StateOptions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ManualState, Mode=TwoWay}" />
+                                                <Button Content="{Binding Ui.ApplyState}" Command="{Binding ApplyStateCommand}" Background="#2C8B75" BorderBrush="#3BAA90" Margin="6,0,0,0" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </StackPanel>
                             </Grid>
                         </StackPanel>
                     </ScrollViewer>
