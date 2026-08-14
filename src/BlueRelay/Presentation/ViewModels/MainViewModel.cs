@@ -46,12 +46,12 @@ public sealed class MainViewModel : ObservableObject
 
         NewProjectCommand = new RelayCommand(StartNewProject);
         _editProjectCommand = new RelayCommand(StartEditProject, () => SelectedProject is not null && !IsEditing);
-        _deleteProjectCommand = new RelayCommand(DeleteSelectedProject, () => SelectedProject is not null && !IsEditing);
-        _applyStateCommand = new RelayCommand(ApplyManualState, () => SelectedProject is not null && !IsEditing);
-        _saveProjectCommand = new RelayCommand(SaveProject, () => IsEditing);
+        _deleteProjectCommand = new RelayCommand(DeleteSelectedProjectAsync, () => SelectedProject is not null && !IsEditing);
+        _applyStateCommand = new RelayCommand(ApplyManualStateAsync, () => SelectedProject is not null && !IsEditing);
+        _saveProjectCommand = new RelayCommand(SaveProjectAsync, () => IsEditing);
         _cancelEditCommand = new RelayCommand(CancelEdit, () => IsEditing);
         BrowsePathCommand = new RelayCommand(BrowseForProjectDirectory, () => IsEditing);
-        ToggleAlwaysOnTopCommand = new RelayCommand(ToggleAlwaysOnTop);
+        ToggleAlwaysOnTopCommand = new RelayCommand(ToggleAlwaysOnTopAsync, () => !IsEditing);
 
         _projectService.Changed += ProjectService_Changed;
         RefreshProjects(_state.SelectedProjectId);
@@ -91,7 +91,7 @@ public sealed class MainViewModel : ObservableObject
                 if (value is null)
                 {
                     _state.SelectedProjectId = null;
-                    _projectService.TrySave(out _);
+                    _ = PersistSelectionAsync();
                 }
 
                 RaiseCommandStates();
@@ -99,10 +99,7 @@ public sealed class MainViewModel : ObservableObject
             }
 
             _state.SelectedProjectId = value.Id;
-            if (!_projectService.TrySave(out var error))
-            {
-                SetStatus(error, isError: true);
-            }
+            _ = PersistSelectionAsync();
 
             ManualState = value.CurrentState;
             RaiseCommandStates();
@@ -173,13 +170,14 @@ public sealed class MainViewModel : ObservableObject
         private set => SetProperty(ref _statusIsError, value);
     }
 
-    public void ToggleAlwaysOnTop()
+    public async Task ToggleAlwaysOnTopAsync()
     {
         IsAlwaysOnTop = !IsAlwaysOnTop;
         _state.IsAlwaysOnTop = IsAlwaysOnTop;
-        if (!_projectService.TrySave(out var error))
+        var saveResult = await _projectService.TrySaveAsync();
+        if (!saveResult.Success)
         {
-            SetStatus(error, isError: true);
+            SetStatus(saveResult.Error, isError: true);
             return;
         }
 
@@ -212,19 +210,20 @@ public sealed class MainViewModel : ObservableObject
         SetStatus("Edit the project record, then save your changes.");
     }
 
-    private void SaveProject()
+    private async Task SaveProjectAsync()
     {
         if (_isCreating)
         {
-            if (!_projectService.TryCreate(EditingName, EditingLocalPath, out var createdProject, out var createError))
+            var createResult = await _projectService.TryCreateAsync(EditingName, EditingLocalPath);
+            if (!createResult.Success)
             {
-                SetStatus(createError, isError: true);
+                SetStatus(createResult.Error, isError: true);
                 return;
             }
 
             IsEditing = false;
             _isCreating = false;
-            RefreshProjects(createdProject!.Id);
+            RefreshProjects(createResult.Project!.Id);
             SetStatus("Project created.");
             return;
         }
@@ -234,9 +233,10 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        if (!_projectService.TryUpdate(SelectedProject.Id, EditingName, EditingLocalPath, out var updateError))
+        var updateResult = await _projectService.TryUpdateAsync(SelectedProject.Id, EditingName, EditingLocalPath);
+        if (!updateResult.Success)
         {
-            SetStatus(updateError, isError: true);
+            SetStatus(updateResult.Error, isError: true);
             return;
         }
 
@@ -263,7 +263,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private void DeleteSelectedProject()
+    private async Task DeleteSelectedProjectAsync()
     {
         if (SelectedProject is null)
         {
@@ -279,9 +279,10 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        if (!_projectService.TryDelete(project.Id, out var error))
+        var deleteResult = await _projectService.TryDeleteAsync(project.Id);
+        if (!deleteResult.Success)
         {
-            SetStatus(error, isError: true);
+            SetStatus(deleteResult.Error, isError: true);
             return;
         }
 
@@ -289,16 +290,20 @@ public sealed class MainViewModel : ObservableObject
         SetStatus("Project record deleted. No local files were changed.");
     }
 
-    private void ApplyManualState()
+    private async Task ApplyManualStateAsync()
     {
         if (SelectedProject is null)
         {
             return;
         }
 
-        if (!_projectService.TryChangeState(SelectedProject.Id, ManualState, manualOverride: true, out var error))
+        var changeResult = await _projectService.TryChangeStateAsync(
+            SelectedProject.Id,
+            ManualState,
+            manualOverride: true);
+        if (!changeResult.Success)
         {
-            SetStatus(error, isError: true);
+            SetStatus(changeResult.Error, isError: true);
             return;
         }
 
@@ -342,6 +347,15 @@ public sealed class MainViewModel : ObservableObject
     {
         StatusIsError = isError;
         StatusMessage = message;
+    }
+
+    private async Task PersistSelectionAsync()
+    {
+        var saveResult = await _projectService.TrySaveAsync();
+        if (!saveResult.Success)
+        {
+            SetStatus(saveResult.Error, isError: true);
+        }
     }
 
     private void RaiseCommandStates()

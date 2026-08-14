@@ -32,12 +32,19 @@ public sealed class JsonStateStore : IStateStore
 
         try
         {
-            await using var stream = File.OpenRead(FilePath);
-            var state = await JsonSerializer.DeserializeAsync<ApplicationState>(stream, _serializerOptions, cancellationToken)
-                .ConfigureAwait(false);
-            state ??= new ApplicationState();
-            state.Projects ??= [];
-            return new StateLoadResult(state, null);
+            var stream = File.OpenRead(FilePath);
+            try
+            {
+                var state = await JsonSerializer.DeserializeAsync<ApplicationState>(stream, _serializerOptions, cancellationToken)
+                    .ConfigureAwait(false);
+                state ??= new ApplicationState();
+                state.Projects ??= [];
+                return new StateLoadResult(state, null);
+            }
+            finally
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+            }
         }
         catch (JsonException exception)
         {
@@ -77,10 +84,15 @@ public sealed class JsonStateStore : IStateStore
 
         try
         {
-            await using (var stream = File.Create(temporaryPath))
+            var stream = File.Create(temporaryPath);
+            try
             {
                 await JsonSerializer.SerializeAsync(stream, state, _serializerOptions, cancellationToken)
                     .ConfigureAwait(false);
+            }
+            finally
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
             }
 
             File.Move(temporaryPath, FilePath, true);

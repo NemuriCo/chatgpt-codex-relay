@@ -4,22 +4,45 @@ namespace BlueRelay.Presentation.ViewModels;
 
 public sealed class RelayCommand : ICommand
 {
-    private readonly Action<object?> _execute;
+    private readonly Func<object?, Task> _executeAsync;
     private readonly Predicate<object?>? _canExecute;
+    private bool _isExecuting;
 
     public RelayCommand(Action execute)
-        : this(_ => execute(), null)
+        : this(_ =>
+        {
+            execute();
+            return Task.CompletedTask;
+        }, null)
     {
     }
 
     public RelayCommand(Action execute, Func<bool> canExecute)
-        : this(_ => execute(), _ => canExecute())
+        : this(_ =>
+        {
+            execute();
+            return Task.CompletedTask;
+        }, _ => canExecute())
     {
     }
 
     public RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null)
+        : this(parameter =>
+        {
+            execute(parameter);
+            return Task.CompletedTask;
+        }, canExecute)
     {
-        _execute = execute;
+    }
+
+    public RelayCommand(Func<Task> execute, Func<bool> canExecute)
+        : this(_ => execute(), _ => canExecute())
+    {
+    }
+
+    public RelayCommand(Func<object?, Task> executeAsync, Predicate<object?>? canExecute = null)
+    {
+        _executeAsync = executeAsync;
         _canExecute = canExecute;
     }
 
@@ -27,12 +50,27 @@ public sealed class RelayCommand : ICommand
 
     public bool CanExecute(object? parameter)
     {
-        return _canExecute?.Invoke(parameter) ?? true;
+        return !_isExecuting && (_canExecute?.Invoke(parameter) ?? true);
     }
 
-    public void Execute(object? parameter)
+    public async void Execute(object? parameter)
     {
-        _execute(parameter);
+        if (!CanExecute(parameter))
+        {
+            return;
+        }
+
+        _isExecuting = true;
+        RaiseCanExecuteChanged();
+        try
+        {
+            await _executeAsync(parameter);
+        }
+        finally
+        {
+            _isExecuting = false;
+            RaiseCanExecuteChanged();
+        }
     }
 
     public void RaiseCanExecuteChanged()

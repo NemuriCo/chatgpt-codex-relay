@@ -26,7 +26,7 @@ public partial class App : WpfApplication
         StartupDiagnostics.Write("App constructed");
     }
 
-    private void Application_Startup(object sender, StartupEventArgs e)
+    private async void Application_Startup(object sender, StartupEventArgs e)
     {
         StartupDiagnostics.Write("Startup begin");
         try
@@ -37,19 +37,27 @@ public partial class App : WpfApplication
             StartupDiagnostics.Write("Creating JsonStateStore");
             var stateStore = new JsonStateStore();
             StartupDiagnostics.Write($"Loading state from {stateStore.FilePath}");
-            var loadResult = stateStore.LoadAsync().GetAwaiter().GetResult();
+            var loadResult = await stateStore.LoadAsync();
             StartupDiagnostics.Write("State load complete");
+
+            StartupDiagnostics.Write("Creating ProjectService");
             var projectService = new ProjectService(
                 loadResult.State,
                 stateStore,
                 new WorkflowStateMachine());
 
             var startupWarning = loadResult.Warning;
-            if (!File.Exists(stateStore.FilePath) && !projectService.TrySave(out var initialSaveError))
+            if (!File.Exists(stateStore.FilePath))
             {
-                startupWarning = string.IsNullOrWhiteSpace(startupWarning)
-                    ? initialSaveError
-                    : $"{startupWarning} {initialSaveError}";
+                StartupDiagnostics.Write("Initial state save begin");
+                var initialSaveResult = await projectService.TrySaveAsync();
+                StartupDiagnostics.Write("Initial state save complete");
+                if (!initialSaveResult.Success)
+                {
+                    startupWarning = string.IsNullOrWhiteSpace(startupWarning)
+                        ? initialSaveResult.Error
+                        : $"{startupWarning} {initialSaveResult.Error}";
+                }
             }
             StartupDiagnostics.Write("ProjectService initialized");
 
@@ -77,7 +85,7 @@ public partial class App : WpfApplication
             _trayService.SetAlwaysOnTop(_mainViewModel.IsAlwaysOnTop);
             StartupDiagnostics.Write("TrayService initialized");
 
-            StartupDiagnostics.Write("Showing MainWindow");
+            StartupDiagnostics.Write("MainWindow.Show");
             _mainWindow.Show();
             var nativeHandle = new WindowInteropHelper(_mainWindow).Handle;
             StartupDiagnostics.Write($"MainWindow.Show returned IsVisible={_mainWindow.IsVisible} Visibility={_mainWindow.Visibility} WindowState={_mainWindow.WindowState} NativeHandle={nativeHandle.ToInt64()}");
@@ -130,7 +138,11 @@ public partial class App : WpfApplication
 
     private void ToggleAlwaysOnTop()
     {
-        _mainViewModel?.ToggleAlwaysOnTop();
+        if (_mainViewModel is not null)
+        {
+            _ = _mainViewModel.ToggleAlwaysOnTopAsync();
+        }
+
         if (_mainViewModel is not null)
         {
             _trayService?.SetAlwaysOnTop(_mainViewModel.IsAlwaysOnTop);

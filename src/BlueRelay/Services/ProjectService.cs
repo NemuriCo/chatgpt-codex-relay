@@ -20,16 +20,18 @@ public sealed class ProjectService
 
     public IReadOnlyList<Project> Projects => _state.Projects;
 
-    public bool TryCreate(string name, string localPath, out Project? project, out string error)
+    public async Task<ProjectMutationResult> TryCreateAsync(
+        string name,
+        string localPath,
+        CancellationToken cancellationToken = default)
     {
-        project = null;
-        if (!ProjectValidator.TryValidate(name, localPath, _state.Projects, null, out var validName, out var validPath, out error))
+        if (!ProjectValidator.TryValidate(name, localPath, _state.Projects, null, out var validName, out var validPath, out var error))
         {
-            return false;
+            return new ProjectMutationResult(false, error);
         }
 
         var now = DateTimeOffset.UtcNow;
-        project = new Project
+        var project = new Project
         {
             Id = Guid.NewGuid(),
             Name = validName,
@@ -40,30 +42,32 @@ public sealed class ProjectService
         };
 
         _state.Projects.Add(project);
-        if (!TryPersist(out error))
+        var persistResult = await TryPersistAsync(cancellationToken);
+        if (!persistResult.Success)
         {
             _state.Projects.Remove(project);
-            project = null;
-            return false;
+            return persistResult;
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
-        error = string.Empty;
-        return true;
+        return new ProjectMutationResult(true, string.Empty, project);
     }
 
-    public bool TryUpdate(Guid projectId, string name, string localPath, out string error)
+    public async Task<ProjectMutationResult> TryUpdateAsync(
+        Guid projectId,
+        string name,
+        string localPath,
+        CancellationToken cancellationToken = default)
     {
         var project = Find(projectId);
         if (project is null)
         {
-            error = "The selected project no longer exists.";
-            return false;
+            return new ProjectMutationResult(false, "The selected project no longer exists.");
         }
 
-        if (!ProjectValidator.TryValidate(name, localPath, _state.Projects, projectId, out var validName, out var validPath, out error))
+        if (!ProjectValidator.TryValidate(name, localPath, _state.Projects, projectId, out var validName, out var validPath, out var error))
         {
-            return false;
+            return new ProjectMutationResult(false, error);
         }
 
         var originalName = project.Name;
@@ -73,26 +77,27 @@ public sealed class ProjectService
         project.LocalPath = validPath;
         project.UpdatedAt = DateTimeOffset.UtcNow;
 
-        if (!TryPersist(out error))
+        var persistResult = await TryPersistAsync(cancellationToken);
+        if (!persistResult.Success)
         {
             project.Name = originalName;
             project.LocalPath = originalPath;
             project.UpdatedAt = originalUpdatedAt;
-            return false;
+            return persistResult;
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
-        error = string.Empty;
-        return true;
+        return new ProjectMutationResult(true, string.Empty);
     }
 
-    public bool TryDelete(Guid projectId, out string error)
+    public async Task<ProjectMutationResult> TryDeleteAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
     {
         var index = _state.Projects.FindIndex(project => project.Id == projectId);
         if (index < 0)
         {
-            error = "The selected project no longer exists.";
-            return false;
+            return new ProjectMutationResult(false, "The selected project no longer exists.");
         }
 
         var project = _state.Projects[index];
@@ -103,49 +108,52 @@ public sealed class ProjectService
             _state.SelectedProjectId = _state.Projects.FirstOrDefault()?.Id;
         }
 
-        if (!TryPersist(out error))
+        var persistResult = await TryPersistAsync(cancellationToken);
+        if (!persistResult.Success)
         {
             _state.Projects.Insert(index, project);
             _state.SelectedProjectId = originalSelection;
-            return false;
+            return persistResult;
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
-        error = string.Empty;
-        return true;
+        return new ProjectMutationResult(true, string.Empty);
     }
 
-    public bool TryChangeState(Guid projectId, WorkflowState target, bool manualOverride, out string error)
+    public async Task<ProjectMutationResult> TryChangeStateAsync(
+        Guid projectId,
+        WorkflowState target,
+        bool manualOverride,
+        CancellationToken cancellationToken = default)
     {
         var project = Find(projectId);
         if (project is null)
         {
-            error = "The selected project no longer exists.";
-            return false;
+            return new ProjectMutationResult(false, "The selected project no longer exists.");
         }
 
         var originalState = project.CurrentState;
         var originalUpdatedAt = project.UpdatedAt;
-        if (!_stateMachine.TryTransition(project, target, manualOverride, out error))
+        if (!_stateMachine.TryTransition(project, target, manualOverride, out var error))
         {
-            return false;
+            return new ProjectMutationResult(false, error);
         }
 
-        if (!TryPersist(out error))
+        var persistResult = await TryPersistAsync(cancellationToken);
+        if (!persistResult.Success)
         {
             project.CurrentState = originalState;
             project.UpdatedAt = originalUpdatedAt;
-            return false;
+            return persistResult;
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
-        error = string.Empty;
-        return true;
+        return new ProjectMutationResult(true, string.Empty);
     }
 
-    public bool TrySave(out string error)
+    public Task<ProjectMutationResult> TrySaveAsync(CancellationToken cancellationToken = default)
     {
-        return TryPersist(out error);
+        return TryPersistAsync(cancellationToken);
     }
 
     public Project? Find(Guid projectId)
@@ -153,18 +161,18 @@ public sealed class ProjectService
         return _state.Projects.FirstOrDefault(project => project.Id == projectId);
     }
 
-    private bool TryPersist(out string error)
+    private async Task<ProjectMutationResult> TryPersistAsync(CancellationToken cancellationToken)
     {
         try
         {
-            _stateStore.SaveAsync(_state).GetAwaiter().GetResult();
-            error = string.Empty;
-            return true;
+            await _stateStore.SaveAsync(_state, cancellationToken);
+            return new ProjectMutationResult(true, string.Empty);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            error = $"BlueRelay could not save its local state. Details: {exception.Message}";
-            return false;
+            return new ProjectMutationResult(
+                false,
+                $"BlueRelay could not save its local state. Details: {exception.Message}");
         }
     }
 }

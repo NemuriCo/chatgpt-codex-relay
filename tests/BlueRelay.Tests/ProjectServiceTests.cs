@@ -35,12 +35,18 @@ public sealed class ProjectServiceTests
         var store = new JsonStateStore(statePath);
         var service = new ProjectService(state, store, new WorkflowStateMachine());
 
-        Assert.IsTrue(service.TryCreate("First", firstDirectory, out var first, out var firstError), firstError);
-        Assert.IsTrue(service.TryCreate("Second", secondDirectory, out var second, out var secondError), secondError);
-        Assert.IsNotNull(first);
-        Assert.IsNotNull(second);
-        Assert.IsTrue(service.TryChangeState(first!.Id, WorkflowState.ReadyForChatGPT, manualOverride: true, out var firstStateError), firstStateError);
-        Assert.IsTrue(service.TryChangeState(second!.Id, WorkflowState.CodexRunning, manualOverride: true, out var secondStateError), secondStateError);
+        var firstResult = await service.TryCreateAsync("First", firstDirectory);
+        var secondResult = await service.TryCreateAsync("Second", secondDirectory);
+        Assert.IsTrue(firstResult.Success, firstResult.Error);
+        Assert.IsTrue(secondResult.Success, secondResult.Error);
+        Assert.IsNotNull(firstResult.Project);
+        Assert.IsNotNull(secondResult.Project);
+        var first = firstResult.Project!;
+        var second = secondResult.Project!;
+        var firstStateResult = await service.TryChangeStateAsync(first.Id, WorkflowState.ReadyForChatGPT, manualOverride: true);
+        var secondStateResult = await service.TryChangeStateAsync(second.Id, WorkflowState.CodexRunning, manualOverride: true);
+        Assert.IsTrue(firstStateResult.Success, firstStateResult.Error);
+        Assert.IsTrue(secondStateResult.Success, secondStateResult.Error);
 
         var reloaded = await store.LoadAsync();
         Assert.AreEqual(WorkflowState.ReadyForChatGPT, reloaded.State.Projects.Single(project => project.Id == first.Id).CurrentState);
@@ -48,7 +54,8 @@ public sealed class ProjectServiceTests
 
         var markerPath = Path.Combine(firstDirectory, "user-file.txt");
         await File.WriteAllTextAsync(markerPath, "must remain");
-        Assert.IsTrue(service.TryDelete(first.Id, out var deleteError), deleteError);
+        var deleteResult = await service.TryDeleteAsync(first.Id);
+        Assert.IsTrue(deleteResult.Success, deleteResult.Error);
 
         Assert.IsTrue(Directory.Exists(firstDirectory));
         Assert.IsTrue(File.Exists(markerPath));
@@ -56,15 +63,36 @@ public sealed class ProjectServiceTests
     }
 
     [TestMethod]
-    public void InvalidProjectRecordsAreRejected()
+    public async Task InvalidProjectRecordsAreRejected()
     {
         var state = new ApplicationState();
         var store = new JsonStateStore(Path.Combine(_testDirectory, "state.json"));
         var service = new ProjectService(state, store, new WorkflowStateMachine());
 
-        Assert.IsFalse(service.TryCreate("", _testDirectory, out _, out var emptyNameError));
-        StringAssert.Contains(emptyNameError, "name");
-        Assert.IsFalse(service.TryCreate("Missing", Path.Combine(_testDirectory, "missing"), out _, out var missingPathError));
-        StringAssert.Contains(missingPathError, "existing directory");
+        var emptyNameResult = await service.TryCreateAsync("", _testDirectory);
+        StringAssert.Contains(emptyNameResult.Error, "name");
+        Assert.IsFalse(emptyNameResult.Success);
+        var missingPathResult = await service.TryCreateAsync("Missing", Path.Combine(_testDirectory, "missing"));
+        StringAssert.Contains(missingPathResult.Error, "existing directory");
+        Assert.IsFalse(missingPathResult.Success);
+    }
+
+    [TestMethod]
+    public async Task FirstLaunchLoadsEmptyStateAndPersistsItWithoutBlocking()
+    {
+        var statePath = Path.Combine(_testDirectory, "state.json");
+        var store = new JsonStateStore(statePath);
+        var stateLoadResult = await store.LoadAsync();
+        var service = new ProjectService(stateLoadResult.State, store, new WorkflowStateMachine());
+
+        Assert.IsFalse(File.Exists(statePath));
+        Assert.AreEqual(0, stateLoadResult.State.Projects.Count);
+
+        var saveResult = await service.TrySaveAsync();
+
+        Assert.IsTrue(saveResult.Success, saveResult.Error);
+        Assert.IsTrue(File.Exists(statePath));
+        var reloaded = await store.LoadAsync();
+        Assert.AreEqual(0, reloaded.State.Projects.Count);
     }
 }
