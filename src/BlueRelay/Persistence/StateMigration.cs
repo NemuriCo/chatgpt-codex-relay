@@ -4,12 +4,16 @@ namespace BlueRelay.Persistence;
 
 public static class StateMigration
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public static bool Migrate(ApplicationState state)
     {
         var changed = state.SchemaVersion < CurrentSchemaVersion;
         state.Projects ??= [];
+        state.BrowserBridge ??= new BrowserBridgeState();
+        state.BrowserBridge.PairedInstallationIds ??= [];
+        state.BrowserBridge.Bindings ??= [];
+        state.BrowserBridge.Tasks ??= [];
 
         foreach (var project in state.Projects)
         {

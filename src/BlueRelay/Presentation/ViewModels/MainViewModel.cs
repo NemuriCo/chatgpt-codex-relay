@@ -3,7 +3,10 @@ using System.Windows.Input;
 using BlueRelay.Localization;
 using BlueRelay.Models;
 using BlueRelay.Services;
+using BlueRelay.Services.Bridges;
 using BlueRelay.Services.Dialogs;
+using System.Windows;
+using WpfApplication = System.Windows.Application;
 using Wpf.Ui.Controls;
 using MediaBrush = System.Windows.Media.Brush;
 using MediaBrushes = System.Windows.Media.Brushes;
@@ -17,6 +20,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IDialogService _dialogService;
     private readonly IFolderPicker _folderPicker;
     private readonly IGitRepositoryDetector _gitRepositoryDetector;
+    private readonly BrowserBridgeService _browserBridge;
     private readonly RelayCommand _editProjectCommand;
     private readonly RelayCommand _deleteProjectCommand;
     private readonly RelayCommand _saveProjectCommand;
@@ -28,6 +32,16 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _refreshProjectGitCommand;
     private readonly RelayCommand _selectProjectCommand;
     private readonly RelayCommand _selectWorkstreamCommand;
+    private readonly RelayCommand _confirmTaskCommand;
+    private readonly RelayCommand _handoffResultCommand;
+    private readonly RelayCommand _openDebugCommand;
+    private readonly RelayCommand _openSimulatedResultCommand;
+    private readonly RelayCommand _simulateResultCommand;
+    private readonly RelayCommand _cancelDebugCommand;
+    private readonly RelayCommand _manualStateCommand;
+    private readonly RelayCommand _generatePairingCodeCommand;
+    private readonly RelayCommand _resetPairingCommand;
+    private readonly RelayCommand _unbindWorkstreamCommand;
     private Project? _selectedProject;
     private ProjectListItemViewModel? _selectedWorkstream;
     private bool _isEditing;
@@ -47,6 +61,14 @@ public sealed class MainViewModel : ObservableObject
     private string? _statusMessage;
     private bool _statusIsError;
     private GitRepositoryInfo? _repositoryInfo;
+    private bool _browserBridgeAvailable;
+    private string? _browserBridgeStatus;
+    private PairingCodeInfo _pairingCode = new(null, null);
+    private ProjectListItemViewModel? _debugWorkstream;
+    private bool _isDebugOpen;
+    private bool _isSimulatingResult;
+    private string _simulatedResultText = string.Empty;
+    private WorkflowState _manualState;
 
     public MainViewModel(
         ApplicationState state,
@@ -54,7 +76,7 @@ public sealed class MainViewModel : ObservableObject
         IDialogService dialogService,
         IFolderPicker folderPicker,
         string? loadWarning)
-        : this(state, projectService, dialogService, folderPicker, new GitRepositoryDetector(), loadWarning)
+        : this(state, projectService, dialogService, folderPicker, new GitRepositoryDetector(), loadWarning, null)
     {
     }
 
@@ -64,13 +86,15 @@ public sealed class MainViewModel : ObservableObject
         IDialogService dialogService,
         IFolderPicker folderPicker,
         IGitRepositoryDetector gitRepositoryDetector,
-        string? loadWarning)
+        string? loadWarning,
+        BrowserBridgeService? browserBridge = null)
     {
         _state = state;
         _projectService = projectService;
         _dialogService = dialogService;
         _folderPicker = folderPicker;
         _gitRepositoryDetector = gitRepositoryDetector;
+        _browserBridge = browserBridge ?? new BrowserBridgeService(state, projectService);
         Ui = LocalizationService.Current;
         _isAlwaysOnTop = state.IsAlwaysOnTop;
 
@@ -84,6 +108,16 @@ public sealed class MainViewModel : ObservableObject
         ToggleCollapsedCommand = new RelayCommand(ToggleCollapsed);
         _selectProjectCommand = new RelayCommand(SelectProject);
         _selectWorkstreamCommand = new RelayCommand(SelectWorkstream);
+        _confirmTaskCommand = new RelayCommand(ConfirmTaskAsync, CanRunTaskAction);
+        _handoffResultCommand = new RelayCommand(HandoffResultAsync, CanRunTaskAction);
+        _openDebugCommand = new RelayCommand(OpenDebug, CanSelectWorkstream);
+        _openSimulatedResultCommand = new RelayCommand(OpenSimulatedResult, CanSimulateResult);
+        _simulateResultCommand = new RelayCommand(SimulateResultAsync, () => IsSimulatingResult && !string.IsNullOrWhiteSpace(SimulatedResultText));
+        _cancelDebugCommand = new RelayCommand(CloseDebug);
+        _manualStateCommand = new RelayCommand(ApplyManualStateAsync, () => IsDebugOpen && DebugWorkstream is not null);
+        _generatePairingCodeCommand = new RelayCommand(GeneratePairingCode);
+        _resetPairingCommand = new RelayCommand(ResetPairingAsync, () => true);
+        _unbindWorkstreamCommand = new RelayCommand(UnbindWorkstreamAsync, CanSelectWorkstream);
         NewWorkstreamCommand = new RelayCommand(StartNewWorkstream, () => SelectedProject is not null && !IsEditing && !IsEditingWorkstream);
         _editProjectCommand = new RelayCommand(StartEditProject, CanMutateProject);
         _deleteProjectCommand = new RelayCommand(DeleteSelectedProjectAsync, CanMutateProject);
@@ -99,6 +133,11 @@ public sealed class MainViewModel : ObservableObject
         ToggleAlwaysOnTopCommand = new RelayCommand(ToggleAlwaysOnTopAsync, () => !IsEditing && !IsEditingWorkstream);
 
         _projectService.Changed += ProjectService_Changed;
+        _browserBridge.Changed += BrowserBridge_Changed;
+        if (_browserBridge.PairingCode.Code is null)
+        {
+            _pairingCode = _browserBridge.GeneratePairingCode();
+        }
         RefreshData(_state.SelectedProjectId, null);
         if (!string.IsNullOrWhiteSpace(loadWarning))
         {
@@ -153,6 +192,26 @@ public sealed class MainViewModel : ObservableObject
     public ICommand RefreshProjectGitCommand => _refreshProjectGitCommand;
 
     public ICommand ToggleAlwaysOnTopCommand { get; }
+
+    public ICommand ConfirmTaskCommand => _confirmTaskCommand;
+
+    public ICommand HandoffResultCommand => _handoffResultCommand;
+
+    public ICommand OpenDebugCommand => _openDebugCommand;
+
+    public ICommand OpenSimulatedResultCommand => _openSimulatedResultCommand;
+
+    public ICommand SimulateResultCommand => _simulateResultCommand;
+
+    public ICommand CancelDebugCommand => _cancelDebugCommand;
+
+    public ICommand ManualStateCommand => _manualStateCommand;
+
+    public ICommand GeneratePairingCodeCommand => _generatePairingCodeCommand;
+
+    public ICommand ResetPairingCommand => _resetPairingCommand;
+
+    public ICommand UnbindWorkstreamCommand => _unbindWorkstreamCommand;
 
     public Project? SelectedProject
     {
@@ -238,6 +297,82 @@ public sealed class MainViewModel : ObservableObject
     {
         get => _isProjectManagementOpen;
         private set => SetProperty(ref _isProjectManagementOpen, value);
+    }
+
+    public bool IsBrowserBridgeAvailable
+    {
+        get => _browserBridgeAvailable;
+        private set
+        {
+            if (SetProperty(ref _browserBridgeAvailable, value))
+            {
+                OnPropertyChanged(nameof(BrowserBridgeStatusBrush));
+            }
+        }
+    }
+
+    public string BrowserBridgeStatus => _browserBridgeStatus
+        ?? (IsBrowserBridgeAvailable ? Ui.BrowserBridgeRunning : Ui.BrowserBridgeUnavailable);
+
+    public MediaBrush BrowserBridgeStatusBrush => IsBrowserBridgeAvailable ? MediaBrushes.LightGreen : MediaBrushes.IndianRed;
+
+    public string BrowserBridgeEndpoint => $"127.0.0.1:{Services.Bridges.BrowserBridgeService.DefaultPort}";
+
+    public string PairingCode => _pairingCode.Code ?? Ui.PairingCodeNotGenerated;
+
+    public string PairingCodeExpiry => _pairingCode.ExpiresAt is { } expiry
+        ? expiry.ToLocalTime().ToString("HH:mm:ss")
+        : string.Empty;
+
+    public ProjectListItemViewModel? DebugWorkstream
+    {
+        get => _debugWorkstream;
+        private set
+        {
+            if (SetProperty(ref _debugWorkstream, value))
+            {
+                ManualState = value?.CurrentState ?? WorkflowState.Idle;
+                OnPropertyChanged(nameof(HasDebugWorkstream));
+            }
+        }
+    }
+
+    public bool HasDebugWorkstream => DebugWorkstream is not null;
+
+    public bool IsDebugOpen
+    {
+        get => _isDebugOpen;
+        private set => SetProperty(ref _isDebugOpen, value);
+    }
+
+    public bool IsSimulatingResult
+    {
+        get => _isSimulatingResult;
+        private set => SetProperty(ref _isSimulatingResult, value);
+    }
+
+    public string SimulatedResultText
+    {
+        get => _simulatedResultText;
+        set
+        {
+            if (SetProperty(ref _simulatedResultText, value))
+            {
+                _simulateResultCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public WorkflowState ManualState
+    {
+        get => _manualState;
+        set
+        {
+            if (SetProperty(ref _manualState, value))
+            {
+                _manualStateCommand.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public bool IsDetectingGit
@@ -426,6 +561,13 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public void SetBrowserBridgeStatus(bool isAvailable, string? status)
+    {
+        IsBrowserBridgeAvailable = isAvailable;
+        _browserBridgeStatus = string.IsNullOrWhiteSpace(status) ? null : status;
+        OnPropertyChanged(nameof(BrowserBridgeStatus));
+    }
+
     private void ToggleCollapsed()
     {
         _state.IsWindowCollapsed = !_state.IsWindowCollapsed;
@@ -460,6 +602,8 @@ public sealed class MainViewModel : ObservableObject
         {
             CancelWorkstreamEdit();
         }
+
+        CloseDebug();
 
         IsProjectManagementOpen = false;
     }
@@ -779,7 +923,23 @@ public sealed class MainViewModel : ObservableObject
 
     private void ProjectService_Changed(object? sender, EventArgs e)
     {
-        RefreshData(_state.SelectedProjectId, SelectedWorkstream?.Id);
+        RefreshDataOnUiThread(_state.SelectedProjectId, SelectedWorkstream?.Id);
+    }
+
+    private void BrowserBridge_Changed(object? sender, EventArgs e)
+    {
+        RefreshDataOnUiThread(_state.SelectedProjectId, SelectedWorkstream?.Id);
+    }
+
+    private void RefreshDataOnUiThread(Guid? preferredProjectId, Guid? preferredWorkstreamId)
+    {
+        if (WpfApplication.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+        {
+            _ = dispatcher.InvokeAsync(() => RefreshData(preferredProjectId, preferredWorkstreamId));
+            return;
+        }
+
+        RefreshData(preferredProjectId, preferredWorkstreamId);
     }
 
     private void RefreshData(Guid? preferredProjectId, Guid? preferredWorkstreamId)
@@ -813,7 +973,7 @@ public sealed class MainViewModel : ObservableObject
         {
             foreach (var workstream in project.Workstreams.OrderByDescending(workstream => workstream.UpdatedAt))
             {
-                var item = new ProjectListItemViewModel(project, workstream, Ui);
+                var item = new ProjectListItemViewModel(project, workstream, Ui, _browserBridge);
                 item.StateChangeRequested += Workstream_StateChangeRequested;
                 Workstreams.Add(item);
                 if (SelectedProject is not null && project.Id == SelectedProject.Id)
@@ -870,6 +1030,189 @@ public sealed class MainViewModel : ObservableObject
 
         RefreshData(item.ProjectId, item.Id);
         SetStatus(Ui.WorkflowUpdated);
+    }
+
+    private bool CanSelectWorkstream(object? parameter)
+    {
+        return parameter is ProjectListItemViewModel || SelectedWorkstream is not null;
+    }
+
+    private bool CanRunTaskAction(object? parameter)
+    {
+        return parameter is ProjectListItemViewModel item && item.CurrentTask is not null;
+    }
+
+    private bool CanSimulateResult(object? parameter)
+    {
+        return parameter is ProjectListItemViewModel item
+            ? item.IsCodexRunning && item.CurrentTask is not null
+            : DebugWorkstream?.IsCodexRunning == true && DebugWorkstream.CurrentTask is not null;
+    }
+
+    private async Task ConfirmTaskAsync(object? parameter)
+    {
+        if (parameter is not ProjectListItemViewModel item || item.CurrentTask is not { } task)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.ConfirmTaskAsync(task.Id);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        RefreshData(item.ProjectId, item.Id);
+        SetStatus(Ui.CodexSimulationStarted);
+    }
+
+    private async Task HandoffResultAsync(object? parameter)
+    {
+        if (parameter is not ProjectListItemViewModel item || item.CurrentTask is not { } task)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.QueueHandoffAsync(task.Id);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        SetStatus(Ui.HandoffQueued);
+    }
+
+    private void OpenDebug(object? parameter)
+    {
+        if (parameter is ProjectListItemViewModel item)
+        {
+            SelectedWorkstream = item;
+        }
+
+        DebugWorkstream = SelectedWorkstream;
+        IsProjectManagementOpen = true;
+        IsDebugOpen = true;
+        IsSimulatingResult = false;
+        SimulatedResultText = string.Empty;
+    }
+
+    private void OpenSimulatedResult(object? parameter)
+    {
+        if (!CanSimulateResult(parameter))
+        {
+            return;
+        }
+
+        if (parameter is ProjectListItemViewModel item)
+        {
+            SelectedWorkstream = item;
+        }
+
+        DebugWorkstream = SelectedWorkstream;
+        IsProjectManagementOpen = true;
+        IsDebugOpen = true;
+        IsSimulatingResult = true;
+        SimulatedResultText = string.Empty;
+        OnPropertyChanged(nameof(IsSimulatingResult));
+    }
+
+    private void CloseDebug()
+    {
+        IsDebugOpen = false;
+        IsSimulatingResult = false;
+        SimulatedResultText = string.Empty;
+    }
+
+    private async Task SimulateResultAsync()
+    {
+        if (DebugWorkstream?.CurrentTask is not { } task || string.IsNullOrWhiteSpace(SimulatedResultText))
+        {
+            return;
+        }
+
+        var result = await _browserBridge.SimulateResultAsync(task.Id, SimulatedResultText);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        var projectId = DebugWorkstream.ProjectId;
+        var workstreamId = DebugWorkstream.Id;
+        CloseDebug();
+        RefreshData(projectId, workstreamId);
+        SetStatus(Ui.SimulatedResultSaved);
+    }
+
+    private async Task ApplyManualStateAsync()
+    {
+        if (DebugWorkstream is null)
+        {
+            return;
+        }
+
+        var result = await _projectService.TryChangeStateAsync(
+            DebugWorkstream.ProjectId,
+            DebugWorkstream.Id,
+            ManualState,
+            manualOverride: true);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        RefreshData(DebugWorkstream.ProjectId, DebugWorkstream.Id);
+        SetStatus(Ui.WorkflowUpdated);
+    }
+
+    private void GeneratePairingCode()
+    {
+        _pairingCode = _browserBridge.GeneratePairingCode();
+        OnPropertyChanged(nameof(PairingCode));
+        OnPropertyChanged(nameof(PairingCodeExpiry));
+    }
+
+    private async Task ResetPairingAsync()
+    {
+        var confirmed = await _dialogService.ConfirmAsync(Ui.ResetPairingTitle, Ui.ResetPairingMessage);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.ResetPairingAsync();
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        _pairingCode = _browserBridge.PairingCode;
+        OnPropertyChanged(nameof(PairingCode));
+        OnPropertyChanged(nameof(PairingCodeExpiry));
+        SetStatus(Ui.PairingReset);
+    }
+
+    private async Task UnbindWorkstreamAsync(object? parameter)
+    {
+        var item = parameter as ProjectListItemViewModel ?? SelectedWorkstream;
+        if (item is null)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.UnbindWorkstreamAsync(item.Id);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        RefreshData(item.ProjectId, item.Id);
+        SetStatus(Ui.WorkstreamUnbound);
     }
 
     private void SetEditingName(string value, bool manuallyEdited)
@@ -948,6 +1291,13 @@ public sealed class MainViewModel : ObservableObject
         _deleteWorkstreamCommand.RaiseCanExecuteChanged();
         _saveWorkstreamCommand.RaiseCanExecuteChanged();
         _cancelWorkstreamEditCommand.RaiseCanExecuteChanged();
+        _confirmTaskCommand.RaiseCanExecuteChanged();
+        _handoffResultCommand.RaiseCanExecuteChanged();
+        _openDebugCommand.RaiseCanExecuteChanged();
+        _openSimulatedResultCommand.RaiseCanExecuteChanged();
+        _simulateResultCommand.RaiseCanExecuteChanged();
+        _manualStateCommand.RaiseCanExecuteChanged();
+        _unbindWorkstreamCommand.RaiseCanExecuteChanged();
         if (BrowsePathCommand is RelayCommand browseCommand)
         {
             browseCommand.RaiseCanExecuteChanged();

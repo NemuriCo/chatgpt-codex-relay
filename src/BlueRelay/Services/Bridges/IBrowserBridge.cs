@@ -3,8 +3,7 @@ using BlueRelay.Models;
 namespace BlueRelay.Services.Bridges;
 
 /// <summary>
-/// Boundary for a future browser extension or localhost/native-messaging bridge.
-/// Phase 1 intentionally provides no implementation.
+/// Boundary for browser-extension task and result handoff.
 /// </summary>
 public interface IBrowserBridge
 {

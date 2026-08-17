@@ -2,9 +2,9 @@
 
 BlueRelay is a small Windows desktop relay for ChatGPT Web ↔ Codex development workflows. It keeps the current handoff state for each local project visible in a compact, always-on-top window so it is clear who should act next.
 
-The repository is in early development. Phase 1.5 focuses on a useful local project/workstream tracker and preparation for future browser and Codex integrations. It does not connect to ChatGPT Web, Codex, or any cloud service yet.
+The repository is in early development. Phase 2 adds a local-only browser bridge between ChatGPT Web and BlueRelay. It still does not automate a real Codex session or use any cloud relay.
 
-## Phase 1.5 MVP
+## Phase 2 MVP
 
 The current MVP includes:
 
@@ -24,6 +24,11 @@ The current MVP includes:
 - Lightweight `zh-CN` and `en-US` UI copy selected from Windows `CurrentUICulture`; unsupported cultures fall back to English.
 - Asynchronous Git repository detection when a project folder is selected or refreshed, including repository-root discovery and remote-name suggestions.
 - Thin `IBrowserBridge` and `ICodexBridge` interfaces for future integrations.
+- A Chrome/Chromium Edge Manifest V3 extension in [`browser-extension`](browser-extension) with no npm or frontend build chain.
+- A Kestrel Local Bridge bound only to `127.0.0.1:48917`, with versioned DTO endpoints and consistent error responses.
+- One explicit browser-tab binding per Workstream, including installation id, tab id, URL, conversation id, title, heartbeat, and connection state.
+- Pairing-code setup and a random long-lived local auth token stored in the user's BlueRelay state file; no token is committed to the repository.
+- `# CODEX_TASK` capture, simulated Codex confirmation/result transitions, and a command queue that targets the original ChatGPT tab without pressing Send.
 
 Deleting a project only removes BlueRelay's saved project and workstream records. It never deletes or changes the selected local directory, Git repository, branch, or files.
 
@@ -45,7 +50,30 @@ The workflow states are:
 
 `Idle` → `ReadyForCodex` → `CodexRunning` → `ReadyForChatGPT` → `ChatGPTReviewing` → `Completed`
 
-Any active stage can enter `Error`. The UI exposes a deliberate manual override so the MVP can be exercised before browser or Codex communication exists. Normal transitions remain centralized in `WorkflowStateMachine`.
+Any active stage can enter `Error`. Normal UI actions advance state automatically. Manual state changes and the simulated Codex result are developer-only actions under a Workstream `⋯` → `Debug` menu. The real Codex bridge is intentionally not implemented in Phase 2.
+
+## Browser Extension and Local Bridge
+
+The extension is a thin adapter for `https://chatgpt.com/*` and the legacy `https://chat.openai.com/*` host. Its popup handles pairing and Workstream binding; it does not maintain a second Project database. The service worker registers tabs, sends a low-frequency five-second heartbeat, captures marked tasks, polls for handoff commands, and routes each command by the exact installation id + tab id key.
+
+The BlueRelay process hosts the Bridge through ASP.NET Core Kestrel on `127.0.0.1:48917`. It never listens on `0.0.0.0` or LAN interfaces. `/v1/health` is read-only and unauthenticated; all other reads/writes require the pairing token except the one-time `/v1/pair` exchange. CORS headers are returned only to `chrome-extension://` or `edge-extension://` origins, so ordinary ChatGPT page JavaScript cannot call the API cross-origin. Pairing codes expire after five minutes and are consumed once; resetting pairing invalidates existing extension tokens.
+
+The bridge stores `BrowserBinding` and `RelayTask` separately from `Workstream`. Prompt and result content is not written to normal diagnostics. A closed or stale tab keeps its binding and task/result in local state, so the result is not lost; the user can reconnect the same tab or bind another tab before trying the handoff again.
+
+Phase 2 does not claim that ChatGPT DOM capture has been verified against a real logged-in ChatGPT page. The content script uses semantic copy-button candidates and `pre`/`code`/message relationships, and its fallback copies an undelivered result to the clipboard when no composer can be found.
+
+## Manual Extension Installation and Test
+
+1. Start BlueRelay with `dotnet run --project src/BlueRelay/BlueRelay.csproj`.
+2. Open Chrome or Edge → Extensions, enable Developer mode, and choose **Load unpacked**.
+3. Select the repository's `browser-extension` directory.
+4. In BlueRelay, open Header `…` → Project management and copy the five-minute pairing code.
+5. Open the extension popup on a ChatGPT tab, enter the code, choose a `Project / Workstream`, and click **Bind**.
+6. Copy a ChatGPT message containing `# CODEX_TASK`; BlueRelay should show `ReadyForCodex` for only the bound Workstream.
+7. Click **Confirm send**, then use Workstream `⋯` → **Simulate Codex result** and save a result.
+8. Click **Send back to ChatGPT**. The extension activates the original tab and fills the composer without sending; inspect and press ChatGPT's Send button yourself.
+
+The real Chrome + ChatGPT DOM flow, composer behavior, and visual layout must be accepted by a user on a logged-in browser. BlueRelay's automated tests cover the bridge contracts and pure extension helpers, not a live ChatGPT session.
 
 ## Git folder detection
 
@@ -61,12 +89,20 @@ When an older Phase 1 `state.json` contains `Project.CurrentState`, startup migr
 src/BlueRelay/
 ├── Models/          Projects, workstreams, and workflow presentation
 ├── Persistence/     Local JSON state storage and recovery
-├── Services/        Project/workstream operations, state machine, Git detection, tray, and future bridges
+├── Services/        Project/workstream operations, state machine, Git detection, tray, and browser bridge
 ├── Presentation/    Thin MVVM helpers, view models, and converters
 ├── App.xaml         Application resources and startup
 └── MainWindow.xaml  Compact floating window
 tests/BlueRelay.Tests/
 └──                 State machine and persistence tests
+
+browser-extension/
+├── manifest.json
+├── background/      MV3 service worker and localhost routing
+├── content-script.js ChatGPT DOM capture and composer injection
+├── popup/           Pairing/binding popup and dark styling
+├── shared/          Pure helpers and bridge client
+└── _locales/        English and Simplified Chinese extension copy
 ```
 
 ## Fluent UI attribution
@@ -91,16 +127,13 @@ dotnet test .\BlueRelay.sln
 
 Run `dotnet run --project src/BlueRelay/BlueRelay.csproj` to start the desktop app. The first launch creates the local state file. Closing the floating window hides BlueRelay to the system tray; choose `Exit` from the tray menu to stop the application. Use the header `…` button to add or edit project records; the main view stays focused on workflow status and the next action.
 
-Phase 1.5 stores local project/workstream metadata and workflow status only. It does not yet connect to ChatGPT Web, Codex, a browser extension, or any cloud service. The current window layout should be visually checked on a real Windows desktop, especially with multiple monitors and different display scaling.
+Phase 2 stores project/workstream metadata, browser bindings, and the current relay task/result locally. It connects only to a paired local browser extension; it still has no real Codex automation and no BlueRelay cloud service. The current window layout should be visually checked on a real Windows desktop, especially with multiple monitors and different display scaling.
 
 ## Roadmap
 
-- ChatGPT browser extension
-- ChatGPT tab or conversation binding
-- Prompt capture
-- Codex integration
-- Result handoff
-- Automatic workflow state tracking
+- Real Codex integration
+- Codex session lifecycle and result streaming
+- Rich task history
 - Multiple ChatGPT/Codex sessions per project
 
 ## License

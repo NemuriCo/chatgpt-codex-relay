@@ -2,7 +2,7 @@ namespace BlueRelay.Models;
 
 public sealed class ApplicationState
 {
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; } = 3;
 
     public List<Project> Projects { get; set; } = [];
 
@@ -16,4 +16,6 @@ public sealed class ApplicationState
     public double? WindowTop { get; set; }
 
     public bool IsWindowCollapsed { get; set; }
+
+    public BrowserBridgeState BrowserBridge { get; set; } = new();
 }

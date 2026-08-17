@@ -1,0 +1,17 @@
+:root { color-scheme: dark; font-family: "Segoe UI", system-ui, sans-serif; }
+body { width: 310px; margin: 0; color: #edf2f7; background: #12161d; font-size: 13px; }
+main { padding: 16px; }
+header { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
+h1 { font-size: 17px; margin: 0; } h2 { font-size: 13px; margin: 0 0 8px; }
+p { margin: 5px 0; line-height: 1.4; } header p { color: #8e9aac; font-size: 10px; }
+.dot, .ok-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #72c7a5; }
+.panel { border: 1px solid #344255; border-radius: 10px; background: #1a202a; padding: 11px; margin-bottom: 9px; }
+.status { display: flex; align-items: center; gap: 7px; color: #9ed4c0; margin-bottom: 10px; }
+.muted { color: #9ba8b8; font-size: 11px; overflow-wrap: anywhere; }
+.status-text { color: #82bfe2; }
+label { display: block; color: #9ba8b8; font-size: 11px; margin: 10px 0 5px; }
+input, select, button { box-sizing: border-box; width: 100%; border-radius: 7px; border: 1px solid #4b5b70; padding: 8px 9px; font: inherit; color: #edf2f7; background: #202a36; }
+button { margin-top: 8px; border: 0; background: #3b82b7; cursor: pointer; font-weight: 600; }
+button:hover { background: #4a9bd2; }
+.error { color: #ff9b9b; font-size: 11px; }
+.hidden { display: none; }

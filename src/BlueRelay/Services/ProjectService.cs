@@ -302,6 +302,13 @@ public sealed class ProjectService
         return Find(projectId)?.Workstreams.FirstOrDefault(workstream => workstream.Id == workstreamId);
     }
 
+    public Workstream? FindWorkstreamForId(Guid workstreamId)
+    {
+        return _state.Projects
+            .SelectMany(project => project.Workstreams)
+            .FirstOrDefault(workstream => workstream.Id == workstreamId);
+    }
+
     private async Task<ProjectMutationResult> TryPersistAsync(CancellationToken cancellationToken)
     {
         try

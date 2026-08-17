@@ -1,6 +1,7 @@
 using MediaBrush = System.Windows.Media.Brush;
 using BlueRelay.Localization;
 using BlueRelay.Models;
+using BlueRelay.Services.Bridges;
 using Wpf.Ui.Controls;
 
 namespace BlueRelay.Presentation.ViewModels;
@@ -8,14 +9,21 @@ namespace BlueRelay.Presentation.ViewModels;
 public sealed class ProjectListItemViewModel : ObservableObject
 {
     private readonly UiTextSet _text;
+    private readonly BrowserBridgeService? _browserBridge;
     private bool _isRefreshing;
     private WorkflowState _debugState;
 
     public ProjectListItemViewModel(Project project, Workstream workstream, UiTextSet text)
+        : this(project, workstream, text, null)
+    {
+    }
+
+    public ProjectListItemViewModel(Project project, Workstream workstream, UiTextSet text, BrowserBridgeService? browserBridge)
     {
         Project = project;
         Workstream = workstream;
         _text = text;
+        _browserBridge = browserBridge;
         _debugState = workstream.CurrentState;
     }
 
@@ -38,9 +46,37 @@ public sealed class ProjectListItemViewModel : ObservableObject
 
     public string LocalPath => Project.LocalPath;
 
-    public string CurrentTaskText => string.IsNullOrWhiteSpace(Workstream.CurrentTaskId)
+    public string? CurrentTaskId => Guid.TryParse(Workstream.CurrentTaskId, out var taskId)
+        ? taskId.ToString("D")
+        : null;
+
+    public string CurrentTaskText => CurrentTask is null
         ? _text.CurrentTaskNone
-        : Workstream.CurrentTaskId;
+        : CurrentTask.Prompt;
+
+    public string CurrentTaskResult => CurrentTask?.Result ?? string.Empty;
+
+    public RelayTask? CurrentTask => _browserBridge?.FindTaskByWorkstream(Workstream.Id);
+
+    public bool HasCurrentTask => CurrentTask is not null;
+
+    public bool HasCurrentResult => !string.IsNullOrWhiteSpace(CurrentTask?.Result);
+
+    public bool CanSendToCodex => CurrentState == WorkflowState.ReadyForCodex && HasCurrentTask;
+
+    public bool IsCodexRunning => CurrentState == WorkflowState.CodexRunning;
+
+    public bool CanSendToChatGPT => CurrentState == WorkflowState.ReadyForChatGPT && HasCurrentResult;
+
+    public bool IsChatGPTReviewing => CurrentState == WorkflowState.ChatGPTReviewing;
+
+    public string BrowserConnectionText => _browserBridge?.FindBindingDto(Workstream.Id) is { } binding
+        ? binding.Connected ? _text.BrowserConnected : _text.BrowserDisconnected
+        : _text.BrowserNotBound;
+
+    public MediaBrush BrowserConnectionBrush => _browserBridge?.FindBindingDto(Workstream.Id)?.Connected == true
+        ? System.Windows.Media.Brushes.LightGreen
+        : System.Windows.Media.Brushes.SlateGray;
 
     public WorkflowState CurrentState => Workstream.CurrentState;
 
@@ -101,6 +137,17 @@ public sealed class ProjectListItemViewModel : ObservableObject
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(LocalPath));
         OnPropertyChanged(nameof(CurrentTaskText));
+        OnPropertyChanged(nameof(CurrentTaskId));
+        OnPropertyChanged(nameof(CurrentTaskResult));
+        OnPropertyChanged(nameof(CurrentTask));
+        OnPropertyChanged(nameof(HasCurrentTask));
+        OnPropertyChanged(nameof(HasCurrentResult));
+        OnPropertyChanged(nameof(CanSendToCodex));
+        OnPropertyChanged(nameof(IsCodexRunning));
+        OnPropertyChanged(nameof(CanSendToChatGPT));
+        OnPropertyChanged(nameof(IsChatGPTReviewing));
+        OnPropertyChanged(nameof(BrowserConnectionText));
+        OnPropertyChanged(nameof(BrowserConnectionBrush));
         OnPropertyChanged(nameof(CurrentState));
         OnPropertyChanged(nameof(StatusLabel));
         OnPropertyChanged(nameof(StatusMarker));

@@ -8,9 +8,9 @@
         Width="378"
         Height="320"
         MinWidth="360"
-        MaxWidth="390"
+        MaxWidth="410"
         MinHeight="0"
-        MaxHeight="440"
+        MaxHeight="680"
         SizeToContent="Height"
         WindowStartupLocation="Manual"
         WindowStyle="None"
@@ -27,17 +27,9 @@
         PreviewMouseLeftButtonUp="Window_PreviewMouseLeftButtonUp"
         Closing="Window_Closing">
     <shell:WindowChrome.WindowChrome>
-        <shell:WindowChrome CaptionHeight="42"
-                            ResizeBorderThickness="0"
-                            GlassFrameThickness="0"
-                            CornerRadius="14"
-                            UseAeroCaptionButtons="False" />
+        <shell:WindowChrome CaptionHeight="42" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="14" UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
-
-    <Border BorderBrush="#344255"
-            BorderThickness="1"
-            CornerRadius="14"
-            Background="#12161D">
+    <Border BorderBrush="#344255" BorderThickness="1" CornerRadius="14" Background="#12161D">
         <Border.Effect>
             <DropShadowEffect BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.28" Color="#000000" />
         </Border.Effect>
@@ -47,482 +39,78 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0"
-                  MinHeight="44"
-                  Margin="14,0,12,0"
-                  Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
+            <Grid Grid.Row="0" MinHeight="44" Margin="14,0,12,0" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-
                 <StackPanel Grid.Column="0" Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,10,0">
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" />
-                        <Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" />
-                        <Ellipse Width="3" Height="3" Fill="#7D8A9C" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,3,0,0">
-                        <Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" />
-                        <Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" />
-                        <Ellipse Width="3" Height="3" Fill="#7D8A9C" />
-                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" /><Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" /><Ellipse Width="3" Height="3" Fill="#7D8A9C" /></StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,3,0,0"><Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" /><Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" /><Ellipse Width="3" Height="3" Fill="#7D8A9C" /></StackPanel>
                 </StackPanel>
-
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Ui.ProductName}" FontSize="15" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding Ui.ProductSubtitle}" Foreground="#8E9AAC" FontSize="10" Margin="0,1,0,0" />
-                </StackPanel>
-
-                <ui:Button Grid.Column="2"
-                           Width="30"
-                           Height="28"
-                           Padding="0"
-                           Margin="4,0,0,0"
-                           Appearance="{Binding AlwaysOnTopAppearance}"
-                           Command="{Binding ToggleAlwaysOnTopCommand}"
-                           ToolTip="{Binding AlwaysOnTopToolTip}"
-                           Icon="{ui:SymbolIcon Pin16}"
-                           shell:WindowChrome.IsHitTestVisibleInChrome="True" />
-                <ui:Button Grid.Column="3"
-                           Width="30"
-                           Height="28"
-                           Padding="0"
-                           Margin="4,0,0,0"
-                           Appearance="Secondary"
-                           Command="{Binding ToggleCollapsedCommand}"
-                           ToolTip="{Binding CollapseToolTip}"
-                           Icon="{ui:SymbolIcon ChevronUp16}"
-                           shell:WindowChrome.IsHitTestVisibleInChrome="True" />
-                <ui:Button Grid.Column="4"
-                           Width="30"
-                           Height="28"
-                           Padding="0"
-                           Margin="4,0,0,0"
-                           Appearance="Secondary"
-                           Command="{Binding OpenProjectManagementCommand}"
-                           ToolTip="{Binding Ui.Settings}"
-                           Icon="{ui:SymbolIcon MoreHorizontal20}"
-                           shell:WindowChrome.IsHitTestVisibleInChrome="True" />
-                <ui:Button Grid.Column="5"
-                           Width="30"
-                           Height="28"
-                           Padding="0"
-                           Margin="4,0,0,0"
-                           Appearance="Secondary"
-                           Click="HideButton_Click"
-                           ToolTip="{Binding Ui.HideToTray}"
-                           Icon="{ui:SymbolIcon Dismiss16}"
-                           shell:WindowChrome.IsHitTestVisibleInChrome="True" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Ui.ProductName}" FontSize="15" FontWeight="SemiBold" /><TextBlock Text="{Binding Ui.ProductSubtitle}" Foreground="#8E9AAC" FontSize="10" Margin="0,1,0,0" /></StackPanel>
+                <ui:Button Grid.Column="2" Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="{Binding AlwaysOnTopAppearance}" Command="{Binding ToggleAlwaysOnTopCommand}" ToolTip="{Binding AlwaysOnTopToolTip}" Icon="{ui:SymbolIcon Pin16}" />
+                <ui:Button Grid.Column="3" Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Command="{Binding ToggleCollapsedCommand}" ToolTip="{Binding CollapseToolTip}" Icon="{ui:SymbolIcon ChevronUp16}" />
+                <ui:Button Grid.Column="4" Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Command="{Binding OpenProjectManagementCommand}" ToolTip="{Binding Ui.Settings}" Icon="{ui:SymbolIcon MoreHorizontal20}" />
+                <ui:Button Grid.Column="5" Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Click="HideButton_Click" ToolTip="{Binding Ui.HideToTray}" Icon="{ui:SymbolIcon Dismiss16}" />
+            </Grid>
+            <Grid Grid.Row="0" MinHeight="44" Margin="14,0,12,0" Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Ellipse Width="6" Height="6" Fill="#72C7A5" Margin="0,0,8,0" /><TextBlock Text="{Binding Ui.ProductName}" FontSize="13" FontWeight="SemiBold" /></StackPanel>
+                <ui:Button Grid.Column="1" Width="30" Height="28" Padding="0" Appearance="Secondary" Command="{Binding ToggleCollapsedCommand}" ToolTip="{Binding CollapseToolTip}" Icon="{ui:SymbolIcon ChevronDown16}" />
             </Grid>
 
-            <Border Grid.Row="0"
-                    Height="50"
-                    Background="#1B222D"
-                    BorderBrush="#344255"
-                    BorderThickness="1"
-                    CornerRadius="10"
-                    Padding="10,6"
-                    Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <Ellipse Width="7" Height="7" Fill="{Binding SelectedWorkstream.StatusBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding SelectedWorkstream.ProjectName, TargetNullValue=BlueRelay}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding SelectedWorkstream.WorkstreamName}" Foreground="#AAB5C5" FontSize="10" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Text="{Binding SelectedWorkstream.StatusLabel}" Foreground="#B6C6D8" FontSize="9" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
-                    </StackPanel>
-                    <ui:Button Grid.Column="2"
-                               Width="30"
-                               Height="28"
-                               Padding="0"
-                               Margin="4,0,0,0"
-                               Appearance="{Binding AlwaysOnTopAppearance}"
-                               Command="{Binding ToggleAlwaysOnTopCommand}"
-                               ToolTip="{Binding AlwaysOnTopToolTip}"
-                               Icon="{ui:SymbolIcon Pin16}"
-                               shell:WindowChrome.IsHitTestVisibleInChrome="True" />
-                    <ui:Button Grid.Column="3"
-                               Width="30"
-                               Height="28"
-                               Padding="0"
-                               Margin="4,0,0,0"
-                               Appearance="Secondary"
-                               Command="{Binding ToggleCollapsedCommand}"
-                               ToolTip="{Binding CollapseToolTip}"
-                               Icon="{ui:SymbolIcon ChevronDown16}"
-                               shell:WindowChrome.IsHitTestVisibleInChrome="True" />
-                    <ui:Button Grid.Column="4"
-                               Width="30"
-                               Height="28"
-                               Padding="0"
-                               Margin="4,0,0,0"
-                               Appearance="Secondary"
-                               Click="HideButton_Click"
-                               ToolTip="{Binding Ui.HideToTray}"
-                               Icon="{ui:SymbolIcon Dismiss16}"
-                               shell:WindowChrome.IsHitTestVisibleInChrome="True" />
-                </Grid>
-            </Border>
-
-            <Grid Grid.Row="1">
-                <Grid Margin="12,0,12,12" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="350">
+            <Grid Grid.Row="1" Margin="12,0,12,12" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
+                <Grid Visibility="{Binding IsProjectManagementOpen, Converter={StaticResource InverseBoolToVisibility}}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="600">
                         <StackPanel>
-                            <StackPanel Margin="0,4,0,12">
-                                <TextBlock Text="{Binding Ui.Workflow}" FontSize="16" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding Ui.WorkflowSubtitle}" Foreground="#8E9AAC" FontSize="11" Margin="0,2,0,0" />
-                            </StackPanel>
-
-                            <ui:Card Padding="14"
-                                     Background="#1B2735"
-                                     Visibility="{Binding HasWorkstreams, Converter={StaticResource BoolToVisibility}}">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding SelectedWorkstream.ProjectName}" Foreground="#9EADBF" FontSize="10" />
-                                    <TextBlock Text="{Binding SelectedWorkstream.WorkstreamName}" FontSize="17" FontWeight="SemiBold" Margin="0,2,0,0" />
-                                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                        <ui:SymbolIcon Symbol="{Binding SelectedWorkstream.StatusIcon}"
-                                                       Foreground="{Binding SelectedWorkstream.StatusBrush}"
-                                                       FontSize="18"
-                                                       VerticalAlignment="Center" />
-                                        <TextBlock Text="{Binding SelectedWorkstream.StatusLabel}"
-                                                   Foreground="{Binding SelectedWorkstream.StatusBrush}"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Margin="7,0,0,0"
-                                                   VerticalAlignment="Center" />
-                                    </StackPanel>
-                                    <TextBlock Text="{Binding SelectedWorkstream.Guidance}"
-                                               Foreground="#C5CFDB"
-                                               FontSize="11"
-                                               TextWrapping="Wrap"
-                                               Margin="0,5,0,0" />
-                                </StackPanel>
-                            </ui:Card>
-
-                            <ItemsControl ItemsSource="{Binding Workstreams}"
-                                          MaxHeight="190"
-                                          Margin="0,10,0,0"
-                                          Visibility="{Binding HasWorkstreams, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Margin="2,6,2,10"><TextBlock Text="{Binding Ui.Workflow}" FontSize="17" FontWeight="SemiBold" /><TextBlock Text="{Binding Ui.WorkflowSubtitle}" Foreground="#8E9AAC" FontSize="10" Margin="0,3,0,0" /></StackPanel>
+                            <ItemsControl ItemsSource="{Binding Workstreams}" Visibility="{Binding HasWorkstreams, Converter={StaticResource BoolToVisibility}}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <ui:Card Padding="10" Margin="0,0,0,8" Background="#1A202A" Tag="{Binding DataContext, Source={x:Reference RootWindow}}">
+                                        <ui:Card Padding="11" Margin="0,0,0,8" Background="#1A202A" MouseLeftButtonUp="WorkstreamCard_MouseLeftButtonUp">
                                             <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <ui:SymbolIcon Symbol="{Binding StatusIcon}"
-                                                               Foreground="{Binding StatusBrush}"
-                                                               FontSize="16"
-                                                               VerticalAlignment="Top"
-                                                               Margin="0,2,8,0" />
-                                                <StackPanel Grid.Column="1">
-                                                    <TextBlock Text="{Binding ProjectName}" Foreground="#8E9AAC" FontSize="10" />
-                                                    <TextBlock Text="{Binding WorkstreamName}" FontSize="13" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{Binding StatusLabel}" Foreground="{Binding StatusBrush}" FontSize="10" Margin="0,2,0,0" />
-                                                </StackPanel>
-                                                <ComboBox Grid.Column="2"
-                                                          Width="132"
-                                                          Margin="8,0,0,0"
-                                                          ItemsSource="{Binding DataContext.StateOptions, Source={x:Reference RootWindow}}"
-                                                          DisplayMemberPath="Label"
-                                                          SelectedValuePath="Value"
-                                                          SelectedValue="{Binding DebugState, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                          ToolTip="{Binding DataContext.Ui.DebugState, Source={x:Reference RootWindow}}" />
+                                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel><TextBlock Text="{Binding ProjectName}" Foreground="#8E9AAC" FontSize="9" /><TextBlock Text="{Binding WorkstreamName}" FontSize="13" FontWeight="SemiBold" Margin="0,2,0,0" /></StackPanel>
+                                                <ui:Button Grid.Column="1" Width="30" Height="28" Padding="0" Appearance="Secondary" Tag="{Binding DataContext, Source={x:Reference RootWindow}}" Click="OpenContextMenuButton_Click" Icon="{ui:SymbolIcon MoreHorizontal20}">
+                                                    <ui:Button.ContextMenu><ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+                                                        <ui:MenuItem Header="{Binding Ui.Debug}" Icon="{ui:SymbolIcon Bug16}"><ui:MenuItem Header="{Binding Ui.ManualState}" Command="{Binding OpenDebugCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /><ui:MenuItem Header="{Binding Ui.SimulateCodexResult}" Icon="{ui:SymbolIcon Beaker16}" Command="{Binding OpenSimulatedResultCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /></ui:MenuItem>
+                                                        <ui:MenuItem Header="{Binding Ui.UnbindWorkstream}" Icon="{ui:SymbolIcon LinkDismiss16}" Command="{Binding UnbindWorkstreamCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                    </ContextMenu></ui:Button.ContextMenu>
+                                                </ui:Button>
+                                                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0"><ui:SymbolIcon Symbol="{Binding StatusIcon}" Foreground="{Binding StatusBrush}" FontSize="15" VerticalAlignment="Center" Margin="0,0,6,0" /><TextBlock Text="{Binding StatusLabel}" Foreground="{Binding StatusBrush}" FontSize="11" FontWeight="SemiBold" /></StackPanel>
+                                                <TextBlock Grid.Row="2" Text="{Binding Guidance}" Foreground="#B7C2D1" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0" />
+                                                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0"><Ellipse Width="6" Height="6" Fill="{Binding BrowserConnectionBrush}" VerticalAlignment="Center" Margin="0,0,5,0" /><TextBlock Text="{Binding BrowserConnectionText}" Foreground="#9BA8B8" FontSize="9" /></StackPanel>
+                                                <ui:Card Grid.Row="4" Grid.ColumnSpan="2" Padding="8" Margin="0,10,0,0" Background="#202A36" Visibility="{Binding HasCurrentTask, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="{Binding CurrentTaskText}" Foreground="#DCE5EE" FontSize="10" TextWrapping="Wrap" MaxHeight="56" /><TextBlock Text="{Binding CurrentTaskResult}" Foreground="#9ED4C0" FontSize="10" TextWrapping="Wrap" MaxHeight="48" Margin="0,6,0,0" Visibility="{Binding HasCurrentResult, Converter={StaticResource BoolToVisibility}}" /></StackPanel></ui:Card>
+                                                <StackPanel Grid.Row="5" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,9,0,0"><ui:Button Content="{Binding DataContext.Ui.SendToCodex, Source={x:Reference RootWindow}}" Appearance="Primary" Icon="{ui:SymbolIcon ArrowRight16}" Command="{Binding DataContext.ConfirmTaskCommand, Source={x:Reference RootWindow}}" CommandParameter="{Binding}" Visibility="{Binding CanSendToCodex, Converter={StaticResource BoolToVisibility}}" /><ui:Button Content="{Binding DataContext.Ui.SendToChatGPT, Source={x:Reference RootWindow}}" Appearance="Primary" Icon="{ui:SymbolIcon ArrowLeft12}" Command="{Binding DataContext.HandoffResultCommand, Source={x:Reference RootWindow}}" CommandParameter="{Binding}" Visibility="{Binding CanSendToChatGPT, Converter={StaticResource BoolToVisibility}}" Margin="6,0,0,0" /><TextBlock Text="{Binding StatusLabel}" Foreground="#82BFE2" FontSize="10" VerticalAlignment="Center" Visibility="{Binding IsCodexRunning, Converter={StaticResource BoolToVisibility}}" /><TextBlock Text="{Binding StatusLabel}" Foreground="#CBB7E9" FontSize="10" VerticalAlignment="Center" Visibility="{Binding IsChatGPTReviewing, Converter={StaticResource BoolToVisibility}}" /></StackPanel>
                                             </Grid>
-                                            <ui:Card.ContextMenu>
-                                                <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
-                                                    <ui:MenuItem Header="{Binding Ui.RenameWorkstream}"
-                                                                 Icon="{ui:SymbolIcon Edit16}"
-                                                                 Command="{Binding RenameWorkstreamCommand}"
-                                                                 CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                    <ui:MenuItem Header="{Binding Ui.DeleteWorkstream}"
-                                                                 Icon="{ui:SymbolIcon Delete16}"
-                                                                 Foreground="#FF9B9B"
-                                                                 Command="{Binding DeleteWorkstreamCommand}"
-                                                                 CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                </ContextMenu>
-                                            </ui:Card.ContextMenu>
                                         </ui:Card>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-
-                            <ui:Card Padding="16" Background="#1A202A" Visibility="{Binding HasWorkstreams, Converter={StaticResource InverseBoolToVisibility}}">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <ui:SymbolIcon Symbol="Flow20" Foreground="#62B5E8" FontSize="28" HorizontalAlignment="Center" />
-                                    <TextBlock Text="{Binding Ui.EmptyTitle}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,8,0,0" />
-                                    <TextBlock Text="{Binding Ui.EmptyDescription}" Foreground="#9BA8B8" FontSize="11" TextWrapping="Wrap" TextAlignment="Center" Margin="0,5,0,12" />
-                                    <ui:Button Content="{Binding Ui.AddProject}"
-                                               Command="{Binding NewProjectCommand}"
-                                               Appearance="Primary"
-                                               Icon="{ui:SymbolIcon AddCircle16}"
-                                               HorizontalAlignment="Center" />
-                                </StackPanel>
-                            </ui:Card>
+                            <ui:Card Padding="18" Margin="0,2,0,0" Background="#1A202A" Visibility="{Binding HasWorkstreams, Converter={StaticResource InverseBoolToVisibility}}"><StackPanel HorizontalAlignment="Center"><ui:SymbolIcon Symbol="Flow20" Foreground="#62B5E8" FontSize="25" HorizontalAlignment="Center" /><TextBlock Text="{Binding Ui.EmptyTitle}" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,8,0,0" /><TextBlock Text="{Binding Ui.EmptyDescription}" Foreground="#9BA8B8" FontSize="10" TextWrapping="Wrap" TextAlignment="Center" Margin="0,4,0,10" /><ui:Button Content="{Binding Ui.AddProject}" Appearance="Primary" Icon="{ui:SymbolIcon AddCircle16}" Command="{Binding NewProjectCommand}" HorizontalAlignment="Center" /></StackPanel></ui:Card>
+                            <ui:Card Padding="8" Margin="0,8,0,0" Background="#1B222C" Visibility="{Binding HasStatusMessage, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="{Binding StatusMessage}" Foreground="{Binding StatusAccentBrush}" FontSize="10" TextWrapping="Wrap" /></ui:Card>
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>
 
-                <Border Panel.ZIndex="5"
-                        Margin="12,0,12,12"
-                        Background="#151C26"
-                        BorderBrush="#3A4B61"
-                        BorderThickness="1"
-                        CornerRadius="12"
-                        Padding="12"
-                        Visibility="{Binding IsProjectManagementOpen, Converter={StaticResource BoolToVisibility}}">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="380">
+                <Grid Visibility="{Binding IsProjectManagementOpen, Converter={StaticResource BoolToVisibility}}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="640">
                         <StackPanel>
-                            <Grid Margin="0,0,0,12">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Ui.ProjectManagement}" FontSize="16" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding Ui.ProjectManagementSubtitle}" Foreground="#8E9AAC" FontSize="10" TextWrapping="Wrap" Margin="0,2,32,0" />
-                                </StackPanel>
-                                <ui:Button HorizontalAlignment="Right"
-                                           Width="30"
-                                           Height="28"
-                                           Padding="0"
-                                           Appearance="Secondary"
-                                           Command="{Binding CloseProjectManagementCommand}"
-                                           ToolTip="{Binding Ui.Close}"
-                                           Icon="{ui:SymbolIcon Dismiss16}" />
-                            </Grid>
+                            <Grid Margin="2,6,2,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{Binding Ui.ProjectManagement}" FontSize="17" FontWeight="SemiBold" /><TextBlock Text="{Binding Ui.ProjectManagementSubtitle}" Foreground="#8E9AAC" FontSize="10" Margin="0,3,0,0" /></StackPanel><ui:Button Grid.Column="1" Width="30" Height="28" Padding="0" Appearance="Secondary" Command="{Binding CloseProjectManagementCommand}" ToolTip="{Binding Ui.Close}" Icon="{ui:SymbolIcon Dismiss16}" /></Grid>
+                            <ui:Card Padding="11" Margin="0,0,0,10" Background="#192B35"><StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{Binding Ui.BrowserBridge}" FontSize="12" FontWeight="SemiBold" /><TextBlock Text="{Binding BrowserBridgeStatus}" Foreground="{Binding BrowserBridgeStatusBrush}" FontSize="10" Margin="0,3,0,0" /></StackPanel><ui:SymbolIcon Grid.Column="1" Symbol="Globe20" Foreground="{Binding BrowserBridgeStatusBrush}" FontSize="22" /></Grid><Grid Margin="0,10,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Ui.BridgeEndpoint}" Foreground="#8E9AAC" FontSize="9" /><TextBlock Grid.Column="1" Text="{Binding BrowserBridgeEndpoint}" Foreground="#D7E0E5" FontSize="9" Margin="8,0,0,0" /><TextBlock Grid.Row="1" Text="{Binding Ui.PairingCodeLabel}" Foreground="#8E9AAC" FontSize="9" Margin="0,5,0,0" /><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding PairingCode}" Foreground="#F4D58A" FontSize="13" FontWeight="SemiBold" Margin="8,3,0,0" /></Grid><TextBlock Text="{Binding Ui.PairingInstructions}" Foreground="#B8C4CF" FontSize="9" TextWrapping="Wrap" Margin="0,7,0,0" /><StackPanel Orientation="Horizontal" Margin="0,9,0,0"><ui:Button Content="{Binding Ui.GeneratePairingCode}" Appearance="Secondary" Icon="{ui:SymbolIcon ArrowClockwise16}" Command="{Binding GeneratePairingCodeCommand}" /><ui:Button Content="{Binding Ui.ResetPairing}" Appearance="Secondary" Icon="{ui:SymbolIcon ShieldDismiss16}" Command="{Binding ResetPairingCommand}" Margin="6,0,0,0" /></StackPanel></StackPanel></ui:Card>
+                            <Grid Margin="0,0,0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Ui.Projects}" FontSize="12" FontWeight="SemiBold" /><ui:Button Grid.Column="1" Content="{Binding Ui.NewProject}" Appearance="Secondary" Icon="{ui:SymbolIcon AddCircle16}" Command="{Binding NewProjectCommand}" /></Grid>
 
-                            <ui:Card Padding="9" Margin="0,0,0,10" Visibility="{Binding HasStatusMessage, Converter={StaticResource BoolToVisibility}}">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="Info16" Foreground="{Binding StatusAccentBrush}" FontSize="16" VerticalAlignment="Top" />
-                                    <TextBlock Text="{Binding StatusMessage}" Foreground="#D5DEE9" FontSize="10" TextWrapping="Wrap" Margin="8,0,0,0" />
-                                </StackPanel>
-                            </ui:Card>
+                            <StackPanel Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibility}}"><ui:Card Padding="11" Background="#1A202A"><StackPanel><TextBlock Text="{Binding Ui.ProjectDetails}" FontSize="12" FontWeight="SemiBold" /><ui:TextBox Text="{Binding EditingName, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="{Binding Ui.Name}" Icon="{ui:SymbolIcon Text16}" Margin="0,9,0,0" /><Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><ui:TextBox Text="{Binding EditingLocalPath, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="{Binding Ui.LocalPath}" Icon="{ui:SymbolIcon Folder16}" /><ui:Button Grid.Column="1" Width="34" Height="32" Padding="0" Margin="6,0,0,0" Appearance="Secondary" Command="{Binding BrowsePathCommand}" ToolTip="{Binding Ui.Browse}" Icon="{ui:SymbolIcon FolderOpen16}" /><ui:Button Grid.Column="2" Width="34" Height="32" Padding="0" Margin="6,0,0,0" Appearance="Secondary" Command="{Binding RefreshRepositoryCommand}" ToolTip="{Binding Ui.RefreshGit}" Icon="{ui:SymbolIcon ArrowClockwise16}" /></Grid><ui:Card Padding="9" Margin="0,10,0,0" Background="#192B35" Visibility="{Binding HasRepositoryInfo, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="{Binding GitInfoTitle}" Foreground="#87D4C2" FontWeight="SemiBold" FontSize="10" /><TextBlock Text="{Binding GitInfoMessage}" Foreground="#C9D5DA" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0" /><TextBlock Text="{Binding RepositoryRootText}" Foreground="#D7E0E5" FontSize="9" TextTrimming="CharacterEllipsis" Margin="0,7,0,0" /><CheckBox Content="{Binding Ui.UseRepositoryRoot}" IsChecked="{Binding UseRepositoryRoot, Mode=TwoWay}" Foreground="#D7E0E5" FontSize="10" Margin="0,7,0,0" Visibility="{Binding HasAlternativeRepositoryRoot, Converter={StaticResource BoolToVisibility}}" /></StackPanel></ui:Card><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0"><ui:Button Content="{Binding Ui.Cancel}" Command="{Binding CancelEditCommand}" Appearance="Secondary" Icon="{ui:SymbolIcon Dismiss16}" /><ui:Button Content="{Binding Ui.SaveProject}" Command="{Binding SaveProjectCommand}" Appearance="Primary" Icon="{ui:SymbolIcon Save16}" Margin="6,0,0,0" /></StackPanel></StackPanel></ui:Card></StackPanel>
 
-                            <ui:Card Padding="12" Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibility}}">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Ui.ProjectDetails}" FontSize="13" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding Ui.Name}" Foreground="#8E9AAC" FontSize="10" Margin="0,10,0,4" />
-                                    <ui:TextBox Text="{Binding EditingName, UpdateSourceTrigger=PropertyChanged}"
-                                                PlaceholderText="{Binding Ui.Name}"
-                                                Icon="{ui:SymbolIcon Document16}" />
-                                    <TextBlock Text="{Binding Ui.LocalPath}" Foreground="#8E9AAC" FontSize="10" Margin="0,10,0,4" />
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <ui:TextBox Grid.Column="0"
-                                                    Text="{Binding EditingLocalPath, UpdateSourceTrigger=PropertyChanged}"
-                                                    PlaceholderText="{Binding Ui.LocalPath}"
-                                                    Icon="{ui:SymbolIcon Folder16}" />
-                                        <ui:Button Grid.Column="1"
-                                                   Width="34"
-                                                   Height="32"
-                                                   Padding="0"
-                                                   Margin="6,0,0,0"
-                                                   Appearance="Secondary"
-                                                   Command="{Binding BrowsePathCommand}"
-                                                   ToolTip="{Binding Ui.Browse}"
-                                                   Icon="{ui:SymbolIcon FolderOpen16}" />
-                                        <ui:Button Grid.Column="2"
-                                                   Width="34"
-                                                   Height="32"
-                                                   Padding="0"
-                                                   Margin="6,0,0,0"
-                                                   Appearance="Secondary"
-                                                   Command="{Binding RefreshRepositoryCommand}"
-                                                   ToolTip="{Binding Ui.RefreshGit}"
-                                                   Icon="{ui:SymbolIcon ArrowClockwise16}" />
-                                    </Grid>
-                                    <ui:Card Padding="9" Margin="0,10,0,0" Background="#192B35" Visibility="{Binding HasRepositoryInfo, Converter={StaticResource BoolToVisibility}}">
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding GitInfoTitle}" Foreground="#87D4C2" FontWeight="SemiBold" FontSize="10" />
-                                            <TextBlock Text="{Binding GitInfoMessage}" Foreground="#C9D5DA" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0" />
-                                            <Grid Margin="0,8,0,0">
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Ui.SelectedFolder}" Foreground="#8E9AAC" FontSize="9" />
-                                                <TextBlock Grid.Column="1" Text="{Binding SelectedFolderText}" Foreground="#D7E0E5" FontSize="9" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Grid.Row="1" Text="{Binding Ui.RepositoryRoot}" Foreground="#8E9AAC" FontSize="9" Margin="0,4,0,0" Visibility="{Binding HasRepositoryRoot, Converter={StaticResource BoolToVisibility}}" />
-                                                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding RepositoryRootText}" Foreground="#D7E0E5" FontSize="9" Margin="8,4,0,0" TextTrimming="CharacterEllipsis" Visibility="{Binding HasRepositoryRoot, Converter={StaticResource BoolToVisibility}}" />
-                                            </Grid>
-                                            <CheckBox Content="{Binding Ui.UseRepositoryRoot}"
-                                                      IsChecked="{Binding UseRepositoryRoot, Mode=TwoWay}"
-                                                      Foreground="#D7E0E5"
-                                                      FontSize="10"
-                                                      Margin="0,8,0,0"
-                                                      Visibility="{Binding HasAlternativeRepositoryRoot, Converter={StaticResource BoolToVisibility}}" />
-                                        </StackPanel>
-                                    </ui:Card>
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-                                        <ui:Button Content="{Binding Ui.Cancel}"
-                                                   Command="{Binding CancelEditCommand}"
-                                                   Appearance="Secondary"
-                                                   Icon="{ui:SymbolIcon Dismiss16}" />
-                                        <ui:Button Content="{Binding Ui.SaveProject}"
-                                                   Command="{Binding SaveProjectCommand}"
-                                                   Appearance="Primary"
-                                                   Icon="{ui:SymbolIcon Save16}" />
-                                    </StackPanel>
-                                </StackPanel>
-                            </ui:Card>
+                            <StackPanel Visibility="{Binding IsEditing, Converter={StaticResource InverseBoolToVisibility}}"><ItemsControl ItemsSource="{Binding Projects}" MaxHeight="180"><ItemsControl.ItemTemplate><DataTemplate><ui:Card Padding="10" Margin="0,0,0,7" Background="#1A202A" MouseLeftButtonUp="ProjectCard_MouseLeftButtonUp"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding LocalPath}" Foreground="#9BA8B8" FontSize="9" TextTrimming="CharacterEllipsis" Margin="0,3,0,0" /><StackPanel Orientation="Horizontal" Margin="0,7,0,0"><TextBlock Text="{Binding Workstreams.Count}" Foreground="#D7E0E5" FontSize="9" /><TextBlock Text="{Binding DataContext.Ui.WorkstreamCountLabel, Source={x:Reference RootWindow}}" Foreground="#9BA8B8" FontSize="9" Margin="4,0,0,0" /></StackPanel></StackPanel><ui:Button Grid.Column="1" Width="30" Height="28" Padding="0" Margin="8,0,0,0" Appearance="Secondary" Tag="{Binding DataContext, Source={x:Reference RootWindow}}" Click="OpenContextMenuButton_Click" Icon="{ui:SymbolIcon MoreHorizontal20}"><ui:Button.ContextMenu><ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}"><ui:MenuItem Header="{Binding Ui.Edit}" Icon="{ui:SymbolIcon Edit16}" Command="{Binding EditProjectCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /><ui:MenuItem Header="{Binding Ui.RefreshGit}" Icon="{ui:SymbolIcon ArrowClockwise16}" Command="{Binding RefreshProjectGitCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /><Separator /><ui:MenuItem Header="{Binding Ui.Delete}" Icon="{ui:SymbolIcon Delete16}" Foreground="#FF9B9B" Command="{Binding DeleteProjectCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /></ContextMenu></ui:Button.ContextMenu></ui:Button></Grid></ui:Card></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><ui:Card Padding="11" Margin="0,8,0,0" Visibility="{Binding HasDetails, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="{Binding Ui.WorkstreamManagement}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,7" /><Grid Visibility="{Binding IsEditingWorkstream, Converter={StaticResource BoolToVisibility}}"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions><TextBlock Text="{Binding Ui.WorkstreamName}" Foreground="#8E9AAC" FontSize="10" /><ui:TextBox Grid.Row="1" Text="{Binding EditingWorkstreamName, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="{Binding Ui.WorkstreamName}" Margin="0,5,0,0" /><StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0"><ui:Button Content="{Binding Ui.Cancel}" Command="{Binding CancelWorkstreamEditCommand}" Appearance="Secondary" Icon="{ui:SymbolIcon Dismiss16}" /><ui:Button Content="{Binding Ui.SaveWorkstream}" Command="{Binding SaveWorkstreamCommand}" Appearance="Primary" Icon="{ui:SymbolIcon Save16}" Margin="6,0,0,0" /></StackPanel></Grid><StackPanel Visibility="{Binding IsEditingWorkstream, Converter={StaticResource InverseBoolToVisibility}}"><ItemsControl ItemsSource="{Binding SelectedProjectWorkstreams}" MaxHeight="150"><ItemsControl.ItemTemplate><DataTemplate><ui:Card Padding="9" Margin="0,0,0,6" Background="#202A36" MouseLeftButtonUp="WorkstreamCard_MouseLeftButtonUp"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><ui:SymbolIcon Symbol="{Binding StatusIcon}" Foreground="{Binding StatusBrush}" FontSize="15" VerticalAlignment="Top" Margin="0,2,8,0" /><StackPanel Grid.Column="1"><TextBlock Text="{Binding WorkstreamName}" FontSize="12" FontWeight="SemiBold" /><TextBlock Text="{Binding BrowserConnectionText}" Foreground="#9BA8B8" FontSize="9" Margin="0,2,0,0" /><TextBlock Text="{Binding StatusLabel}" Foreground="{Binding StatusBrush}" FontSize="10" Margin="0,2,0,0" /></StackPanel><ui:Button Grid.Column="2" Width="30" Height="28" Padding="0" Margin="8,0,0,0" Appearance="Secondary" Tag="{Binding DataContext, Source={x:Reference RootWindow}}" Click="OpenContextMenuButton_Click" Icon="{ui:SymbolIcon MoreHorizontal20}"><ui:Button.ContextMenu><ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}"><ui:MenuItem Header="{Binding Ui.RenameWorkstream}" Icon="{ui:SymbolIcon Edit16}" Command="{Binding RenameWorkstreamCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /><ui:MenuItem Header="{Binding Ui.Debug}" Icon="{ui:SymbolIcon Bug16}" Command="{Binding OpenDebugCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /><ui:MenuItem Header="{Binding Ui.DeleteWorkstream}" Icon="{ui:SymbolIcon Delete16}" Foreground="#FF9B9B" Command="{Binding DeleteWorkstreamCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" /></ContextMenu></ui:Button.ContextMenu></ui:Button></Grid></ui:Card></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><StackPanel Orientation="Horizontal" Margin="0,2,0,0"><ui:Button Content="{Binding Ui.NewWorkstream}" Command="{Binding NewWorkstreamCommand}" Appearance="Secondary" Icon="{ui:SymbolIcon AddCircle16}" /><ui:Button Content="{Binding Ui.UnbindWorkstream}" Command="{Binding UnbindWorkstreamCommand}" CommandParameter="{Binding SelectedWorkstream}" Appearance="Secondary" Icon="{ui:SymbolIcon LinkDismiss16}" Margin="6,0,0,0" Visibility="{Binding SelectedWorkstream, Converter={StaticResource NullToVisibility}}" /></StackPanel></StackPanel></StackPanel></ui:Card></StackPanel>
 
-                            <StackPanel Visibility="{Binding IsEditing, Converter={StaticResource InverseBoolToVisibility}}">
-                                <ItemsControl ItemsSource="{Binding Projects}" MaxHeight="190">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <ui:Card Padding="11" Margin="0,0,0,8" Background="#1A202A" MouseLeftButtonUp="ProjectCard_MouseLeftButtonUp">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel>
-                                                        <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Text="{Binding LocalPath}" Foreground="#9BA8B8" FontSize="9" TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
-                                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                                            <ui:SymbolIcon Symbol="Flow20" Foreground="#62B5E8" FontSize="14" VerticalAlignment="Center" />
-                                                            <TextBlock Text="{Binding DataContext.Ui.WorkstreamCountLabel, Source={x:Reference RootWindow}}" Foreground="#9BA8B8" FontSize="10" Margin="6,0,0,0" />
-                                                            <TextBlock Text="{Binding Workstreams.Count}" Foreground="#D8E1EC" FontSize="10" Margin="4,0,0,0" />
-                                                        </StackPanel>
-                                                    </StackPanel>
-                                                    <ui:Button Grid.Column="1"
-                                                               Width="30"
-                                                               Height="28"
-                                                               Padding="0"
-                                                               Margin="8,0,0,0"
-                                                               Appearance="Secondary"
-                                                               Tag="{Binding DataContext, Source={x:Reference RootWindow}}"
-                                                               Click="OpenContextMenuButton_Click"
-                                                               ToolTip="{Binding DataContext.Ui.Settings, Source={x:Reference RootWindow}}"
-                                                               Icon="{ui:SymbolIcon MoreHorizontal20}">
-                                                        <ui:Button.ContextMenu>
-                                                            <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
-                                                                <ui:MenuItem Header="{Binding Ui.Edit}" Icon="{ui:SymbolIcon Edit16}" Command="{Binding EditProjectCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                                <ui:MenuItem Header="{Binding Ui.RefreshGit}" Icon="{ui:SymbolIcon ArrowClockwise16}" Command="{Binding RefreshProjectGitCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                                <Separator />
-                                                                <ui:MenuItem Header="{Binding Ui.Delete}" Icon="{ui:SymbolIcon Delete16}" Foreground="#FF9B9B" Command="{Binding DeleteProjectCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                            </ContextMenu>
-                                                        </ui:Button.ContextMenu>
-                                                    </ui:Button>
-                                                </Grid>
-                                            </ui:Card>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-
-                                <ui:Button Content="{Binding Ui.NewProject}"
-                                           Command="{Binding NewProjectCommand}"
-                                           Appearance="Primary"
-                                           Icon="{ui:SymbolIcon AddCircle16}"
-                                           HorizontalAlignment="Left"
-                                           Margin="0,2,0,0" />
-
-                                <ui:Card Padding="11" Margin="0,12,0,0" Visibility="{Binding HasDetails, Converter={StaticResource BoolToVisibility}}">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding Ui.WorkstreamManagement}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6" />
-
-                                        <Grid Visibility="{Binding IsEditingWorkstream, Converter={StaticResource BoolToVisibility}}">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                            </Grid.RowDefinitions>
-                                            <TextBlock Text="{Binding Ui.WorkstreamName}" Foreground="#8E9AAC" FontSize="10" />
-                                            <ui:TextBox Grid.Row="1" Text="{Binding EditingWorkstreamName, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="{Binding Ui.WorkstreamName}" Margin="0,5,0,0" />
-                                            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
-                                                <ui:Button Content="{Binding Ui.Cancel}" Command="{Binding CancelWorkstreamEditCommand}" Appearance="Secondary" Icon="{ui:SymbolIcon Dismiss16}" />
-                                                <ui:Button Content="{Binding Ui.SaveWorkstream}" Command="{Binding SaveWorkstreamCommand}" Appearance="Primary" Icon="{ui:SymbolIcon Save16}" />
-                                            </StackPanel>
-                                        </Grid>
-
-                                        <StackPanel Visibility="{Binding IsEditingWorkstream, Converter={StaticResource InverseBoolToVisibility}}">
-                                            <ItemsControl ItemsSource="{Binding SelectedProjectWorkstreams}" MaxHeight="150">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <ui:Card Padding="9" Margin="0,0,0,6" Background="#202A36" MouseLeftButtonUp="WorkstreamCard_MouseLeftButtonUp">
-                                                            <Grid>
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <ui:SymbolIcon Symbol="{Binding StatusIcon}" Foreground="{Binding StatusBrush}" FontSize="15" VerticalAlignment="Top" Margin="0,2,8,0" />
-                                                                <StackPanel Grid.Column="1">
-                                                                    <TextBlock Text="{Binding WorkstreamName}" FontSize="12" FontWeight="SemiBold" />
-                                                                    <TextBlock Text="{Binding DataContext.Ui.NoSession, Source={x:Reference RootWindow}}" Foreground="#7F8D9E" FontSize="9" Margin="0,2,0,0" />
-                                                                    <TextBlock Text="{Binding StatusLabel}" Foreground="{Binding StatusBrush}" FontSize="10" Margin="0,2,0,0" />
-                                                                </StackPanel>
-                                                                <ui:Button Grid.Column="2"
-                                                                           Width="30"
-                                                                           Height="28"
-                                                                           Padding="0"
-                                                                           Margin="8,0,0,0"
-                                                                           Appearance="Secondary"
-                                                                           Tag="{Binding DataContext, Source={x:Reference RootWindow}}"
-                                                                           Click="OpenContextMenuButton_Click"
-                                                                           Icon="{ui:SymbolIcon MoreHorizontal20}">
-                                                                    <ui:Button.ContextMenu>
-                                                                        <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
-                                                                            <ui:MenuItem Header="{Binding Ui.RenameWorkstream}" Icon="{ui:SymbolIcon Edit16}" Command="{Binding RenameWorkstreamCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                                            <ui:MenuItem Header="{Binding Ui.DeleteWorkstream}" Icon="{ui:SymbolIcon Delete16}" Foreground="#FF9B9B" Command="{Binding DeleteWorkstreamCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                                        </ContextMenu>
-                                                                    </ui:Button.ContextMenu>
-                                                                </ui:Button>
-                                                            </Grid>
-                                                        </ui:Card>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                            <ui:Button Content="{Binding Ui.NewWorkstream}"
-                                                       Command="{Binding NewWorkstreamCommand}"
-                                                       Appearance="Secondary"
-                                                       Icon="{ui:SymbolIcon AddCircle16}"
-                                                       HorizontalAlignment="Left"
-                                                       Margin="0,2,0,0" />
-                                            <Grid Margin="0,12,0,0" Visibility="{Binding SelectedWorkstream, Converter={StaticResource NullToVisibility}}">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding SelectedWorkstream.WorkstreamName}" FontSize="11" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{Binding SelectedWorkstream.CurrentTaskText}" Foreground="#8E9AAC" FontSize="9" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                                <ComboBox Grid.Column="1"
-                                                          Width="138"
-                                                          ItemsSource="{Binding StateOptions}"
-                                                          DisplayMemberPath="Label"
-                                                          SelectedValuePath="Value"
-                                                          SelectedValue="{Binding SelectedWorkstream.DebugState, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                          ToolTip="{Binding Ui.DebugState}" />
-                                            </Grid>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </ui:Card>
-                            </StackPanel>
+                            <ui:Card Padding="11" Margin="0,10,0,0" Background="#2A2532" Visibility="{Binding IsDebugOpen, Converter={StaticResource BoolToVisibility}}"><StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{Binding Ui.Debug}" FontSize="12" FontWeight="SemiBold" /><TextBlock Text="{Binding DebugWorkstream.WorkstreamName}" Foreground="#CBB7E9" FontSize="10" Margin="0,3,0,0" /></StackPanel><ui:Button Grid.Column="1" Width="28" Height="26" Padding="0" Appearance="Secondary" Command="{Binding CancelDebugCommand}" Icon="{ui:SymbolIcon Dismiss16}" /></Grid><StackPanel Visibility="{Binding IsSimulatingResult, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="{Binding Ui.SimulatedResultTitle}" Foreground="#D9CAE9" FontSize="10" Margin="0,10,0,3" /><TextBlock Text="{Binding Ui.SimulatedResultHint}" Foreground="#B5A7C3" FontSize="9" TextWrapping="Wrap" /><ui:TextBox Text="{Binding SimulatedResultText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="70" TextWrapping="Wrap" Margin="0,7,0,0" /><ui:Button Content="{Binding Ui.SimulateCodexResult}" Appearance="Primary" Icon="{ui:SymbolIcon Beaker16}" Command="{Binding SimulateResultCommand}" HorizontalAlignment="Right" Margin="0,8,0,0" /></StackPanel><StackPanel Visibility="{Binding IsSimulatingResult, Converter={StaticResource InverseBoolToVisibility}}"><TextBlock Text="{Binding Ui.ManualState}" Foreground="#D9CAE9" FontSize="10" Margin="0,10,0,3" /><ComboBox ItemsSource="{Binding StateOptions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ManualState, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" /><ui:Button Content="{Binding Ui.ApplyDebugState}" Appearance="Secondary" Icon="{ui:SymbolIcon Save16}" Command="{Binding ManualStateCommand}" HorizontalAlignment="Right" Margin="0,8,0,0" /></StackPanel></StackPanel></ui:Card>
+                            <ui:Card Padding="8" Margin="0,10,0,0" Background="#1B222C" Visibility="{Binding HasStatusMessage, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="{Binding StatusMessage}" Foreground="{Binding StatusAccentBrush}" FontSize="10" TextWrapping="Wrap" /></ui:Card>
                         </StackPanel>
                     </ScrollViewer>
-                </Border>
+                </Grid>
             </Grid>
         </Grid>
     </Border>

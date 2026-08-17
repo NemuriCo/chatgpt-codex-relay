@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BlueRelay</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header><span class="dot"></span><div><h1>BlueRelay</h1><p data-i18n="subtitle">ChatGPT tab bridge</p></div></header>
+    <section id="unsupported" class="panel hidden"><strong data-i18n="unsupported">Current page is not a supported ChatGPT page.</strong></section>
+    <section id="offline" class="panel hidden"><strong data-i18n="offline">BlueRelay is not connected.</strong><p data-i18n="runFirst">Start BlueRelay, then pair this extension.</p></section>
+    <section id="pairing" class="panel hidden"><h2 data-i18n="pairTitle">Pair with BlueRelay</h2><p data-i18n="pairHint">Enter the one-time code shown in BlueRelay project management.</p><input id="pairingCode" inputmode="numeric" maxlength="6" placeholder="123456"><button id="pairButton" data-i18n="pair">Pair</button><p id="pairError" class="error"></p></section>
+    <section id="connected" class="hidden">
+      <div class="status"><span class="ok-dot"></span><span data-i18n="connected">Connected to local BlueRelay</span></div>
+      <section class="panel"><h2 data-i18n="currentTab">Current tab</h2><p id="tabTitle" class="muted"></p><label for="workstreamSelect" data-i18n="bindTo">Bound to</label><select id="workstreamSelect"></select><button id="bindButton" data-i18n="bind">Bind</button><p id="bindStatus" class="muted"></p></section>
+      <section class="panel"><h2 data-i18n="currentStatus">Current status</h2><p id="workflowStatus" class="status-text" data-i18n="waiting">Waiting for a new task</p><button id="clipboardButton" data-i18n="captureClipboard">Capture task from clipboard</button><p id="captureStatus" class="muted"></p></section>
+    </section>
+  </main>
+  <script src="../shared/utils.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

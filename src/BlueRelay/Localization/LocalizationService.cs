@@ -75,6 +75,34 @@ public sealed class UiTextSet
     public required string SelectedFolder { get; init; }
     public required string UseRepositoryRoot { get; init; }
     public required string RefreshGit { get; init; }
+    public required string BrowserBridge { get; init; }
+    public required string BrowserBridgeRunning { get; init; }
+    public required string BrowserBridgeUnavailable { get; init; }
+    public required string BridgeEndpoint { get; init; }
+    public required string PairingCodeNotGenerated { get; init; }
+    public required string GeneratePairingCode { get; init; }
+    public required string ResetPairing { get; init; }
+    public required string PairingInstructions { get; init; }
+    public required string BrowserConnected { get; init; }
+    public required string BrowserDisconnected { get; init; }
+    public required string BrowserNotBound { get; init; }
+    public required string SendToCodex { get; init; }
+    public required string SendToChatGPT { get; init; }
+    public required string CodexSimulationStarted { get; init; }
+    public required string HandoffQueued { get; init; }
+    public required string SimulatedResultSaved { get; init; }
+    public required string Debug { get; init; }
+    public required string ManualState { get; init; }
+    public required string ApplyDebugState { get; init; }
+    public required string SimulateCodexResult { get; init; }
+    public required string SimulatedResultTitle { get; init; }
+    public required string SimulatedResultHint { get; init; }
+    public required string ResetPairingTitle { get; init; }
+    public required string ResetPairingMessage { get; init; }
+    public required string PairingReset { get; init; }
+    public required string WorkstreamUnbound { get; init; }
+    public required string UnbindWorkstream { get; init; }
+    public required string PairingCodeLabel { get; init; }
 
     public required IReadOnlyDictionary<WorkflowState, string> StateLabels { get; init; }
     public required IReadOnlyDictionary<WorkflowState, string> StateGuidance { get; init; }
@@ -172,6 +200,34 @@ public static class LocalizationService
         SelectedFolder = "Selected folder",
         UseRepositoryRoot = "Use repository root",
         RefreshGit = "Refresh Git info",
+        BrowserBridge = "Browser Bridge",
+        BrowserBridgeRunning = "Browser Bridge running",
+        BrowserBridgeUnavailable = "Browser Bridge unavailable",
+        BridgeEndpoint = "Local endpoint",
+        PairingCodeNotGenerated = "Generate a code",
+        GeneratePairingCode = "Generate pairing code",
+        ResetPairing = "Reset pairing",
+        PairingInstructions = "In the extension popup, enter this one-time code. It expires in five minutes.",
+        BrowserConnected = "ChatGPT • connected",
+        BrowserDisconnected = "ChatGPT • disconnected",
+        BrowserNotBound = "ChatGPT • not bound",
+        SendToCodex = "Confirm send",
+        SendToChatGPT = "Send back to ChatGPT",
+        CodexSimulationStarted = "Simulation started. Use ⋯ → Simulate Codex result.",
+        HandoffQueued = "Result queued for the original ChatGPT tab.",
+        SimulatedResultSaved = "Simulated result saved. It is ready for ChatGPT.",
+        Debug = "Debug",
+        ManualState = "Set state manually",
+        ApplyDebugState = "Apply debug state",
+        SimulateCodexResult = "Simulate Codex result",
+        SimulatedResultTitle = "Simulated Codex result",
+        SimulatedResultHint = "This developer-only result is not sent to a real Codex session.",
+        ResetPairingTitle = "Reset browser pairing?",
+        ResetPairingMessage = "Existing extension tokens will stop working. Generate a new pairing code afterward.",
+        PairingReset = "Browser pairing reset.",
+        WorkstreamUnbound = "ChatGPT tab unbound.",
+        UnbindWorkstream = "Unbind ChatGPT tab",
+        PairingCodeLabel = "Pairing code",
         StateLabels = new Dictionary<WorkflowState, string>
         {
             [WorkflowState.Idle] = "Waiting for a new task",
@@ -266,6 +322,34 @@ public static class LocalizationService
         SelectedFolder = "所选文件夹",
         UseRepositoryRoot = "使用仓库根目录",
         RefreshGit = "刷新 Git 信息",
+        BrowserBridge = "浏览器连接",
+        BrowserBridgeRunning = "浏览器连接已启动",
+        BrowserBridgeUnavailable = "浏览器连接不可用",
+        BridgeEndpoint = "本地地址",
+        PairingCodeNotGenerated = "生成配对码",
+        GeneratePairingCode = "生成配对码",
+        ResetPairing = "重置配对",
+        PairingInstructions = "在扩展弹窗中输入此一次性配对码，有效期五分钟。",
+        BrowserConnected = "ChatGPT · 已连接",
+        BrowserDisconnected = "ChatGPT · 已断开",
+        BrowserNotBound = "ChatGPT · 未绑定",
+        SendToCodex = "确认发送",
+        SendToChatGPT = "发回 ChatGPT",
+        CodexSimulationStarted = "已进入模拟运行，请使用 ⋯ → 模拟 Codex 返回。",
+        HandoffQueued = "结果已发送到原 ChatGPT 标签页队列。",
+        SimulatedResultSaved = "模拟结果已保存，可以发回 ChatGPT。",
+        Debug = "调试",
+        ManualState = "手动设置状态",
+        ApplyDebugState = "应用调试状态",
+        SimulateCodexResult = "模拟 Codex 返回",
+        SimulatedResultTitle = "模拟 Codex 返回",
+        SimulatedResultHint = "这里只用于开发测试，不会连接真实 Codex 会话。",
+        ResetPairingTitle = "重置浏览器配对？",
+        ResetPairingMessage = "现有扩展 token 将失效，之后需要重新生成配对码。",
+        PairingReset = "浏览器配对已重置。",
+        WorkstreamUnbound = "ChatGPT 标签页已解除绑定。",
+        UnbindWorkstream = "解除 ChatGPT 绑定",
+        PairingCodeLabel = "配对码",
         StateLabels = new Dictionary<WorkflowState, string>
         {
             [WorkflowState.Idle] = "等待新任务",

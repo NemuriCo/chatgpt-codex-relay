@@ -4,6 +4,7 @@ using BlueRelay.Localization;
 using BlueRelay.Persistence;
 using BlueRelay.Presentation.ViewModels;
 using BlueRelay.Services;
+using BlueRelay.Services.Bridges;
 using BlueRelay.Services.Dialogs;
 
 using WpfMessageBox = System.Windows.MessageBox;
@@ -19,6 +20,7 @@ public partial class App : WpfApplication
     private MainWindow? _mainWindow;
     private MainViewModel? _mainViewModel;
     private TrayService? _trayService;
+    private BrowserBridgeServer? _browserBridgeServer;
 
     public App()
     {
@@ -62,6 +64,11 @@ public partial class App : WpfApplication
             }
             StartupDiagnostics.Write("ProjectService initialized");
 
+            StartupDiagnostics.Write("Creating BrowserBridgeService");
+            var browserBridge = new BrowserBridgeService(loadResult.State, projectService);
+            _browserBridgeServer = new BrowserBridgeServer(browserBridge);
+            StartupDiagnostics.Write("BrowserBridgeService initialized");
+
             StartupDiagnostics.Write("Constructing MainViewModel");
             _mainViewModel = new MainViewModel(
                 loadResult.State,
@@ -69,8 +76,15 @@ public partial class App : WpfApplication
                 new MessageBoxDialogService(),
                 new WindowsFolderPicker(LocalizationService.Current),
                 new GitRepositoryDetector(),
-                startupWarning);
+                startupWarning,
+                browserBridge);
             StartupDiagnostics.Write("MainViewModel initialized");
+
+            var bridgeStartResult = await _browserBridgeServer.StartAsync();
+            _mainViewModel.SetBrowserBridgeStatus(bridgeStartResult.Success, bridgeStartResult.Error);
+            StartupDiagnostics.Write(bridgeStartResult.Success
+                ? $"BrowserBridge ready port={_browserBridgeServer.Port}"
+                : "BrowserBridge unavailable; BlueRelay will continue without browser connectivity");
 
             StartupDiagnostics.Write("Constructing MainWindow and loading XAML");
             _mainWindow = new MainWindow
@@ -106,10 +120,14 @@ public partial class App : WpfApplication
         }
     }
 
-    private void Application_Exit(object sender, ExitEventArgs e)
+    private async void Application_Exit(object sender, ExitEventArgs e)
     {
         StartupDiagnostics.Write($"Application exit code={e.ApplicationExitCode}");
         _trayService?.Dispose();
+        if (_browserBridgeServer is not null)
+        {
+            await _browserBridgeServer.StopAsync();
+        }
     }
 
     private void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
@@ -158,6 +176,10 @@ public partial class App : WpfApplication
         }
 
         _trayService?.Dispose();
+        if (_browserBridgeServer is not null)
+        {
+            await _browserBridgeServer.StopAsync();
+        }
         _mainWindow?.CloseFromApplication();
         Shutdown();
     }
