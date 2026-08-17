@@ -21,6 +21,7 @@ public sealed class WorkflowStateMachine
             [WorkflowState.CodexRunning] = new HashSet<WorkflowState>
             {
                 WorkflowState.ReadyForChatGPT,
+                WorkflowState.NeedsAttention,
                 WorkflowState.Error
             },
             [WorkflowState.ReadyForChatGPT] = new HashSet<WorkflowState>
@@ -47,7 +48,15 @@ public sealed class WorkflowStateMachine
                 WorkflowState.CodexRunning,
                 WorkflowState.ReadyForChatGPT,
                 WorkflowState.ChatGPTReviewing,
-                WorkflowState.Completed
+                WorkflowState.Completed,
+                WorkflowState.NeedsAttention
+            },
+            [WorkflowState.NeedsAttention] = new HashSet<WorkflowState>
+            {
+                WorkflowState.Idle,
+                WorkflowState.ReadyForCodex,
+                WorkflowState.CodexRunning,
+                WorkflowState.Error
             }
         };
 

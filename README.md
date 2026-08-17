@@ -2,14 +2,16 @@
 
 BlueRelay is a small Windows desktop relay for ChatGPT Web ↔ Codex development workflows. It keeps the current handoff state for each local project visible in a compact, always-on-top window so it is clear who should act next.
 
-The repository is in early development. Phase 2 adds a local-only browser bridge between ChatGPT Web and BlueRelay. It still does not automate a real Codex session or use any cloud relay.
+The repository is in early development. Phase 3 adds a local Codex App Server bridge while keeping the browser bridge local-only. BlueRelay does not use a BlueRelay cloud relay.
 
-## Phase 2 MVP
+## Phase 3 MVP
 
 The current MVP includes:
 
 - A .NET 8 WPF Windows desktop application.
 - A Fluent-style WPF UI built with WPF-UI 4.3.0, while retaining the custom WindowChrome shell.
+- A lazy local Codex App Server process/protocol bridge with JSONL request correlation, notification progress, approval requests, cancellation, restart diagnostics, and per-Workstream thread mapping.
+- Markdown task/result payload files under %LocalAppData%/BlueRelay/relay/...; state.json keeps metadata and short notes without duplicating long bodies.
 - A compact dark Windows floating window with a native-style rounded shell, explicit drag header, no resize grip, edge snapping, and persisted placement.
 - A collapsed 50px status mode for keeping the current workstream visible without covering the desktop.
 - Multiple Projects, each with multiple independent Workstreams and workflow states.
@@ -23,12 +25,12 @@ The current MVP includes:
 - Windows 10/11 multi-monitor-aware placement, with the last position, collapsed state, and Always on top preference retained between launches.
 - Lightweight `zh-CN` and `en-US` UI copy selected from Windows `CurrentUICulture`; unsupported cultures fall back to English.
 - Asynchronous Git repository detection when a project folder is selected or refreshed, including repository-root discovery and remote-name suggestions.
-- Thin `IBrowserBridge` and `ICodexBridge` interfaces for future integrations.
+- Thin IBrowserBridge and ICodexBridge interfaces are now backed by the local Codex App Server implementation.
 - A Chrome/Chromium Edge Manifest V3 extension in [`browser-extension`](browser-extension) with no npm or frontend build chain.
 - A Kestrel Local Bridge bound only to `127.0.0.1:48917`, with versioned DTO endpoints and consistent error responses.
 - One explicit browser-tab binding per Workstream, including installation id, tab id, URL, conversation id, title, heartbeat, and connection state.
 - Pairing-code setup and a random long-lived local auth token stored in the user's BlueRelay state file; no token is committed to the repository.
-- `# CODEX_TASK` capture, simulated Codex confirmation/result transitions, and a command queue that targets the original ChatGPT tab without pressing Send.
+- `# CODEX_TASK` capture, real Codex confirmation/result transitions, an explicitly marked simulated-result debug path, and a command queue that targets the original ChatGPT tab without pressing Send.
 
 Deleting a project only removes BlueRelay's saved project and workstream records. It never deletes or changes the selected local directory, Git repository, branch, or files.
 
@@ -50,9 +52,11 @@ The workflow states are:
 
 `Idle` → `ReadyForCodex` → `CodexRunning` → `ReadyForChatGPT` → `ChatGPTReviewing` → `Completed`
 
-Any active stage can enter `Error`. Normal UI actions advance state automatically. Manual state changes and the simulated Codex result are developer-only actions under a Workstream `⋯` → `Debug` menu. The real Codex bridge is intentionally not implemented in Phase 2.
+Any active stage can enter NeedsAttention or Error. Normal UI actions advance state automatically. Manual state changes and the simulated Codex result remain developer-only actions under a Workstream Debug menu. The Codex App Server details are documented in docs/CODEX_APP_SERVER.md.
 
 ## Browser Extension and Local Bridge
+
+Phase 3 adds the local Codex App Server described in docs/CODEX_APP_SERVER.md. It starts only when a user sends a captured task, maps one Codex thread to each Workstream, persists task/result bodies as checked payload files, and keeps the existing ChatGPT browser bridge as a separate local adapter. The simulated result action remains a developer-only fallback for UI tests.
 
 The extension is a thin adapter for `https://chatgpt.com/*` and the legacy `https://chat.openai.com/*` host. Its popup handles pairing and Workstream binding; it does not maintain a second Project database. The service worker registers tabs, sends a low-frequency five-second heartbeat, captures marked tasks, polls for handoff commands, and routes each command by the exact installation id + tab id key.
 
@@ -60,7 +64,7 @@ The BlueRelay process hosts the Bridge through ASP.NET Core Kestrel on `127.0.0.
 
 The bridge stores `BrowserBinding` and `RelayTask` separately from `Workstream`. Prompt and result content is not written to normal diagnostics. A closed or stale tab keeps its binding and task/result in local state, so the result is not lost; the user can reconnect the same tab or bind another tab before trying the handoff again.
 
-Phase 2 does not claim that ChatGPT DOM capture has been verified against a real logged-in ChatGPT page. The content script uses semantic copy-button candidates and `pre`/`code`/message relationships, and its fallback copies an undelivered result to the clipboard when no composer can be found.
+Phase 3 still does not claim that ChatGPT DOM capture has been verified against a real logged-in ChatGPT page. The content script uses semantic copy-button candidates and pre/code/message relationships, and its fallback copies an undelivered result to the clipboard when no composer can be found.
 
 ## Manual Extension Installation and Test
 
@@ -70,7 +74,7 @@ Phase 2 does not claim that ChatGPT DOM capture has been verified against a real
 4. In BlueRelay, open Header `…` → Project management and copy the five-minute pairing code.
 5. Open the extension popup on a ChatGPT tab, enter the code, choose a `Project / Workstream`, and click **Bind**.
 6. Copy a ChatGPT message containing `# CODEX_TASK`; BlueRelay should show `ReadyForCodex` for only the bound Workstream.
-7. Click **Confirm send**, then use Workstream `⋯` → **Simulate Codex result** and save a result.
+7. Click **Confirm send**. BlueRelay starts Codex lazily, requests approvals when needed, and shows progress in the Workstream card.
 8. Click **Send back to ChatGPT**. The extension activates the original tab and fills the composer without sending; inspect and press ChatGPT's Send button yourself.
 
 The real Chrome + ChatGPT DOM flow, composer behavior, and visual layout must be accepted by a user on a logged-in browser. BlueRelay's automated tests cover the bridge contracts and pure extension helpers, not a live ChatGPT session.
@@ -129,12 +133,13 @@ dotnet test .\BlueRelay.sln
 
 Run `dotnet run --project src/BlueRelay/BlueRelay.csproj` to start the desktop app. The first launch creates the local state file. Closing the floating window hides BlueRelay to the system tray; choose `Exit` from the tray menu to stop the application. Use the header `…` button to add or edit project records; the main view stays focused on workflow status and the next action.
 
-Phase 2 stores project/workstream metadata, browser bindings, and the current relay task/result locally. It connects only to a paired local browser extension; it still has no real Codex automation and no BlueRelay cloud service. The current window layout should be visually checked on a real Windows desktop, especially with multiple monitors and different display scaling.
+Phase 3 stores project/workstream metadata, browser bindings, Codex thread ids, and relay payload metadata locally. It connects only to a paired local browser extension and a locally launched Codex App Server; there is no BlueRelay cloud service. The current window layout and real ChatGPT DOM flow should still be visually checked on a real Windows desktop and logged-in browser.
 
 ## Roadmap
 
-- Real Codex integration
-- Codex session lifecycle and result streaming
+- Rich Codex task history
+- Multiple ChatGPT/Codex sessions per project
+- Better user-input dialogs for experimental Codex tool requests
 - Rich task history
 - Multiple ChatGPT/Codex sessions per project
 

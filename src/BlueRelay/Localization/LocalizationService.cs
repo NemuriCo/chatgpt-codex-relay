@@ -78,6 +78,7 @@ public sealed class UiTextSet
     public required string UseRepositoryRoot { get; init; }
     public required string RefreshGit { get; init; }
     public required string BrowserBridge { get; init; }
+    public required string CodexAppServer { get; init; }
     public required string BrowserBridgeRunning { get; init; }
     public required string BrowserBridgeUnavailable { get; init; }
     public required string BridgeEndpoint { get; init; }
@@ -89,6 +90,19 @@ public sealed class UiTextSet
     public required string BrowserDisconnected { get; init; }
     public required string BrowserNotBound { get; init; }
     public required string SendToCodex { get; init; }
+    public required string CodexRunning { get; init; }
+    public required string CodexCancel { get; init; }
+    public required string CodexCancelled { get; init; }
+    public required string CodexProgress { get; init; }
+    public required string CodexApprovalTitle { get; init; }
+    public required string CodexApprovalMessage { get; init; }
+    public required string Allow { get; init; }
+    public required string ResetCodexThread { get; init; }
+    public required string ResetCodexThreadTitle { get; init; }
+    public required string ResetCodexThreadMessage { get; init; }
+    public required string CodexThreadReset { get; init; }
+    public required string AddUserNote { get; init; }
+    public required string ResultNote { get; init; }
     public required string SendToChatGPT { get; init; }
     public required string RetrySendToChatGPT { get; init; }
     public required string CompleteCurrentRound { get; init; }
@@ -215,6 +229,7 @@ public static class LocalizationService
         UseRepositoryRoot = "Use repository root",
         RefreshGit = "Refresh Git info",
         BrowserBridge = "Browser Bridge",
+        CodexAppServer = "Codex App Server",
         BrowserBridgeRunning = "Browser Bridge running",
         BrowserBridgeUnavailable = "Browser Bridge unavailable",
         BridgeEndpoint = "Local endpoint",
@@ -226,6 +241,19 @@ public static class LocalizationService
         BrowserDisconnected = "ChatGPT • disconnected",
         BrowserNotBound = "ChatGPT • not bound",
         SendToCodex = "Confirm send",
+        CodexRunning = "Codex running",
+        CodexCancel = "Cancel Codex task",
+        CodexCancelled = "Codex task cancelled.",
+        CodexProgress = "Progress",
+        CodexApprovalTitle = "Codex approval request",
+        CodexApprovalMessage = "Codex is requesting permission to continue. Review the request and choose whether to allow it.",
+        Allow = "Allow",
+        ResetCodexThread = "New Codex session",
+        ResetCodexThreadTitle = "Start a new Codex session?",
+        ResetCodexThreadMessage = "The next task will start a new Codex App Server thread for this Workstream. Existing task data will be kept.",
+        CodexThreadReset = "The Codex session will restart with the next task.",
+        AddUserNote = "Optional note for Codex",
+        ResultNote = "Optional note before returning the result",
         SendToChatGPT = "Send back to ChatGPT",
         RetrySendToChatGPT = "Retry sending to ChatGPT",
         CompleteCurrentRound = "Complete current round",
@@ -260,6 +288,7 @@ public static class LocalizationService
             [WorkflowState.ReadyForChatGPT] = "Next: send to ChatGPT",
             [WorkflowState.ChatGPTReviewing] = "Waiting for ChatGPT review",
             [WorkflowState.Completed] = "Round completed",
+            [WorkflowState.NeedsAttention] = "Needs attention",
             [WorkflowState.Error] = "Needs attention"
         },
         StateGuidance = new Dictionary<WorkflowState, string>
@@ -270,6 +299,7 @@ public static class LocalizationService
             [WorkflowState.ReadyForChatGPT] = "Hand the Codex result back for review.",
             [WorkflowState.ChatGPTReviewing] = "Wait for the next review decision.",
             [WorkflowState.Completed] = "This task round is closed.",
+            [WorkflowState.NeedsAttention] = "Review the issue, then retry or clear the task.",
             [WorkflowState.Error] = "Resolve the issue before continuing."
         }
     };
@@ -349,6 +379,7 @@ public static class LocalizationService
         UseRepositoryRoot = "使用仓库根目录",
         RefreshGit = "刷新 Git 信息",
         BrowserBridge = "浏览器连接",
+        CodexAppServer = "Codex App Server",
         BrowserBridgeRunning = "浏览器连接已启动",
         BrowserBridgeUnavailable = "浏览器连接不可用",
         BridgeEndpoint = "本地地址",
@@ -360,6 +391,19 @@ public static class LocalizationService
         BrowserDisconnected = "ChatGPT · 已断开",
         BrowserNotBound = "ChatGPT · 未绑定",
         SendToCodex = "确认发送",
+        CodexRunning = "Codex 运行中",
+        CodexCancel = "取消 Codex 任务",
+        CodexCancelled = "Codex 任务已取消。",
+        CodexProgress = "运行进度",
+        CodexApprovalTitle = "Codex 请求审批",
+        CodexApprovalMessage = "Codex 请求继续执行。请查看请求后决定是否允许。",
+        Allow = "允许",
+        ResetCodexThread = "新建 Codex 会话",
+        ResetCodexThreadTitle = "新建 Codex 会话？",
+        ResetCodexThreadMessage = "该工作流的下一次任务会在 Codex App Server 中新建线程。已有任务数据会保留。",
+        CodexThreadReset = "下一次任务将使用新的 Codex 会话。",
+        AddUserNote = "给 Codex 的补充说明（可选）",
+        ResultNote = "返回结果前的补充说明（可选）",
         SendToChatGPT = "发回 ChatGPT",
         RetrySendToChatGPT = "重试返回 ChatGPT",
         CompleteCurrentRound = "结束本轮",
@@ -394,6 +438,7 @@ public static class LocalizationService
             [WorkflowState.ReadyForChatGPT] = "下一步：发送给 ChatGPT",
             [WorkflowState.ChatGPTReviewing] = "等待 ChatGPT 审查",
             [WorkflowState.Completed] = "本轮已完成",
+            [WorkflowState.NeedsAttention] = "需要处理",
             [WorkflowState.Error] = "需要处理"
         },
         StateGuidance = new Dictionary<WorkflowState, string>
@@ -404,6 +449,7 @@ public static class LocalizationService
             [WorkflowState.ReadyForChatGPT] = "把 Codex 的结果交回审查。",
             [WorkflowState.ChatGPTReviewing] = "等待下一步审查决定。",
             [WorkflowState.Completed] = "本轮任务已结束。",
+            [WorkflowState.NeedsAttention] = "检查问题后重试，或清空任务。",
             [WorkflowState.Error] = "处理问题后再继续。"
         }
     };

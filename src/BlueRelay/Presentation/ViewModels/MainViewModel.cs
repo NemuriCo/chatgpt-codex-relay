@@ -5,6 +5,7 @@ using BlueRelay.Models;
 using BlueRelay.Services;
 using BlueRelay.Services.Bridges;
 using BlueRelay.Services.Dialogs;
+using BlueRelay.Services.Codex;
 using System.Windows;
 using WpfApplication = System.Windows.Application;
 using Wpf.Ui.Controls;
@@ -21,6 +22,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IFolderPicker _folderPicker;
     private readonly IGitRepositoryDetector _gitRepositoryDetector;
     private readonly BrowserBridgeService _browserBridge;
+    private readonly ICodexBridge? _codexBridge;
     private readonly RelayCommand _editProjectCommand;
     private readonly RelayCommand _deleteProjectCommand;
     private readonly RelayCommand _saveProjectCommand;
@@ -33,6 +35,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _selectProjectCommand;
     private readonly RelayCommand _selectWorkstreamCommand;
     private readonly RelayCommand _confirmTaskCommand;
+    private readonly RelayCommand _cancelCodexTaskCommand;
+    private readonly RelayCommand _resetCodexThreadCommand;
     private readonly RelayCommand _handoffResultCommand;
     private readonly RelayCommand _completeCurrentRoundCommand;
     private readonly RelayCommand _clearCurrentTaskCommand;
@@ -82,7 +86,7 @@ public sealed class MainViewModel : ObservableObject
         IDialogService dialogService,
         IFolderPicker folderPicker,
         string? loadWarning)
-        : this(state, projectService, dialogService, folderPicker, new GitRepositoryDetector(), loadWarning, null)
+        : this(state, projectService, dialogService, folderPicker, new GitRepositoryDetector(), loadWarning, null, null)
     {
     }
 
@@ -93,7 +97,8 @@ public sealed class MainViewModel : ObservableObject
         IFolderPicker folderPicker,
         IGitRepositoryDetector gitRepositoryDetector,
         string? loadWarning,
-        BrowserBridgeService? browserBridge = null)
+        BrowserBridgeService? browserBridge = null,
+        ICodexBridge? codexBridge = null)
     {
         _state = state;
         _projectService = projectService;
@@ -101,6 +106,7 @@ public sealed class MainViewModel : ObservableObject
         _folderPicker = folderPicker;
         _gitRepositoryDetector = gitRepositoryDetector;
         _browserBridge = browserBridge ?? new BrowserBridgeService(state, projectService);
+        _codexBridge = codexBridge ?? _browserBridge.CodexBridge;
         Ui = LocalizationService.Current;
         _isAlwaysOnTop = state.IsAlwaysOnTop;
 
@@ -115,6 +121,8 @@ public sealed class MainViewModel : ObservableObject
         _selectProjectCommand = new RelayCommand(SelectProject);
         _selectWorkstreamCommand = new RelayCommand(SelectWorkstream);
         _confirmTaskCommand = new RelayCommand(ConfirmTaskAsync, CanRunTaskAction);
+        _cancelCodexTaskCommand = new RelayCommand(CancelCodexTaskAsync, CanCancelCodexTask);
+        _resetCodexThreadCommand = new RelayCommand(ResetCodexThreadAsync, CanSelectWorkstream);
         _handoffResultCommand = new RelayCommand(HandoffResultAsync, CanHandoffResult);
         _completeCurrentRoundCommand = new RelayCommand(CompleteCurrentRoundAsync, CanCompleteCurrentRound);
         _clearCurrentTaskCommand = new RelayCommand(ClearCurrentTaskAsync, CanSelectWorkstream);
@@ -144,6 +152,12 @@ public sealed class MainViewModel : ObservableObject
 
         _projectService.Changed += ProjectService_Changed;
         _browserBridge.Changed += BrowserBridge_Changed;
+        if (_codexBridge is not null)
+        {
+            _codexBridge.ProgressChanged += CodexBridge_ProgressChanged;
+            _codexBridge.ApprovalRequested += CodexBridge_ApprovalRequested;
+            _codexBridge.StatusChanged += CodexBridge_StatusChanged;
+        }
         if (_browserBridge.PairingCode.Code is null)
         {
             _pairingCode = _browserBridge.GeneratePairingCode();
@@ -204,6 +218,24 @@ public sealed class MainViewModel : ObservableObject
     public ICommand ToggleAlwaysOnTopCommand { get; }
 
     public ICommand ConfirmTaskCommand => _confirmTaskCommand;
+
+    public ICommand CancelCodexTaskCommand => _cancelCodexTaskCommand;
+
+    public ICommand ResetCodexThreadCommand => _resetCodexThreadCommand;
+
+    public CodexBridgeStatus CodexStatus => _codexBridge?.Status ?? CodexBridgeStatus.Disconnected;
+
+    public string CodexStatusText => CodexStatus switch
+    {
+        CodexBridgeStatus.Connected => Ui.BrowserBridgeRunning,
+        CodexBridgeStatus.Running => Ui.CodexRunning,
+        CodexBridgeStatus.WaitingForApproval => Ui.CodexApprovalTitle,
+        CodexBridgeStatus.Connecting => Ui.CodexRunning,
+        CodexBridgeStatus.Error => Ui.GetStateLabel(WorkflowState.Error),
+        _ => Ui.NoSession
+    };
+
+    public string CodexVersion => _codexBridge?.Version ?? string.Empty;
 
     public ICommand HandoffResultCommand => _handoffResultCommand;
 
@@ -622,6 +654,11 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public Task StopCodexAsync()
+    {
+        return _codexBridge?.StopAsync() ?? Task.CompletedTask;
+    }
+
     public void SetBrowserBridgeStatus(bool isAvailable, string? status)
     {
         IsBrowserBridgeAvailable = isAvailable;
@@ -1014,7 +1051,91 @@ public sealed class MainViewModel : ObservableObject
         RefreshDataOnUiThread(
             _state.SelectedProjectId,
             SelectedWorkstream?.Id,
-            UpdateDeliveryStatus);
+        UpdateDeliveryStatus);
+    }
+
+    private void CodexBridge_StatusChanged(object? sender, EventArgs e)
+    {
+        RefreshDataOnUiThread(_state.SelectedProjectId, SelectedWorkstream?.Id, () =>
+        {
+            OnPropertyChanged(nameof(CodexStatus));
+            OnPropertyChanged(nameof(CodexStatusText));
+            OnPropertyChanged(nameof(CodexVersion));
+            RaiseCommandStates();
+        });
+    }
+
+    private void CodexBridge_ProgressChanged(object? sender, CodexProgressUpdate update)
+    {
+        var workstream = _projectService.FindWorkstreamForId(update.WorkstreamId);
+        if (workstream is null)
+        {
+            return;
+        }
+
+        workstream.CodexProgress = update.Stage + "：" + update.Detail;
+        RefreshDataOnUiThread(_state.SelectedProjectId, update.WorkstreamId);
+    }
+
+    private async void CodexBridge_ApprovalRequested(object? sender, CodexApprovalRequest request)
+    {
+        try
+        {
+            var message = BuildApprovalMessage(request);
+            var approved = await AskOnUiThreadAsync(Ui.CodexApprovalTitle, message, Ui.Allow).ConfigureAwait(false);
+            if (_codexBridge is not null)
+            {
+                await _codexBridge.RespondToApprovalAsync(
+                    request.RequestId,
+                    request.Method,
+                    approved,
+                    request.Params).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception)
+        {
+            SetStatus(exception.Message, isError: true);
+        }
+    }
+
+    private Task<bool> AskOnUiThreadAsync(string title, string message, string acceptLabel)
+    {
+        if (WpfApplication.Current?.Dispatcher is not { } dispatcher || dispatcher.CheckAccess())
+        {
+            return _dialogService.AskAsync(title, message, acceptLabel);
+        }
+
+        return dispatcher.InvokeAsync(
+                () => _dialogService.AskAsync(title, message, acceptLabel))
+            .Task
+            .Unwrap();
+    }
+
+    private static string BuildApprovalMessage(CodexApprovalRequest request)
+    {
+        var summary = request.Method switch
+        {
+            "item/commandExecution/requestApproval" => ReadJsonString(request.Params, "command") ?? "Codex wants to execute a command.",
+            "item/fileChange/requestApproval" => ReadJsonString(request.Params, "reason") ?? "Codex wants to modify project files.",
+            "item/permissions/requestApproval" => ReadJsonString(request.Params, "reason") ?? "Codex wants additional project permissions.",
+            "item/tool/requestUserInput" => "Codex is asking for user input.",
+            _ => "Codex sent an approval request."
+        };
+        return summary + "\n\n" + LocalizationService.Current.CodexApprovalMessage;
+    }
+
+    private static string? ReadJsonString(System.Text.Json.JsonElement element, params string[] path)
+    {
+        var current = element;
+        foreach (var property in path)
+        {
+            if (current.ValueKind != System.Text.Json.JsonValueKind.Object || !current.TryGetProperty(property, out current))
+            {
+                return null;
+            }
+        }
+
+        return current.ValueKind == System.Text.Json.JsonValueKind.String ? current.GetString() : null;
     }
 
     private void RefreshDataOnUiThread(
@@ -1176,7 +1297,12 @@ public sealed class MainViewModel : ObservableObject
 
     private bool CanRunTaskAction(object? parameter)
     {
-        return parameter is ProjectListItemViewModel item && item.CurrentTask is not null;
+        return parameter is ProjectListItemViewModel item && item.CanSendToCodex;
+    }
+
+    private bool CanCancelCodexTask(object? parameter)
+    {
+        return parameter is ProjectListItemViewModel item && item.CanCancelCodex;
     }
 
     private bool CanHandoffResult(object? parameter)
@@ -1205,7 +1331,9 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var result = await _browserBridge.ConfirmTaskAsync(task.Id);
+        var result = _codexBridge is null
+            ? await _browserBridge.ConfirmTaskAsync(task.Id)
+            : await _browserBridge.SendTaskToCodexAsync(task.Id, item.UserNote);
         if (!result.Success)
         {
             SetStatus(result.Error, isError: true);
@@ -1213,7 +1341,49 @@ public sealed class MainViewModel : ObservableObject
         }
 
         RefreshData(item.ProjectId, item.Id);
-        SetStatus(Ui.CodexSimulationStarted);
+        SetStatus(_codexBridge is null ? Ui.CodexSimulationStarted : Ui.CodexRunning);
+    }
+
+    private async Task CancelCodexTaskAsync(object? parameter)
+    {
+        if (parameter is not ProjectListItemViewModel item)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.CancelCodexTaskAsync(item.Id);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        SetStatus(Ui.CodexCancelled);
+    }
+
+    private async Task ResetCodexThreadAsync(object? parameter)
+    {
+        var item = parameter as ProjectListItemViewModel ?? SelectedWorkstream;
+        if (item is null)
+        {
+            return;
+        }
+
+        var confirmed = await _dialogService.ConfirmAsync(Ui.ResetCodexThreadTitle, Ui.ResetCodexThreadMessage);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.ResetCodexThreadAsync(item.Id);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        RefreshData(item.ProjectId, item.Id);
+        SetStatus(Ui.CodexThreadReset);
     }
 
     private async Task HandoffResultAsync(object? parameter)
@@ -1488,6 +1658,8 @@ public sealed class MainViewModel : ObservableObject
         _saveWorkstreamCommand.RaiseCanExecuteChanged();
         _cancelWorkstreamEditCommand.RaiseCanExecuteChanged();
         _confirmTaskCommand.RaiseCanExecuteChanged();
+        _cancelCodexTaskCommand.RaiseCanExecuteChanged();
+        _resetCodexThreadCommand.RaiseCanExecuteChanged();
         _handoffResultCommand.RaiseCanExecuteChanged();
         _completeCurrentRoundCommand.RaiseCanExecuteChanged();
         _clearCurrentTaskCommand.RaiseCanExecuteChanged();

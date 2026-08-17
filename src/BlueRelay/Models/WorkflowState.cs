@@ -8,5 +8,6 @@ public enum WorkflowState
     ReadyForChatGPT,
     ChatGPTReviewing,
     Completed,
+    NeedsAttention,
     Error
 }

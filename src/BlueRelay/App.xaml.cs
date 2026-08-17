@@ -5,6 +5,7 @@ using BlueRelay.Persistence;
 using BlueRelay.Presentation.ViewModels;
 using BlueRelay.Services;
 using BlueRelay.Services.Bridges;
+using BlueRelay.Services.Codex;
 using BlueRelay.Services.Dialogs;
 
 using WpfMessageBox = System.Windows.MessageBox;
@@ -65,7 +66,8 @@ public partial class App : WpfApplication
             StartupDiagnostics.Write("ProjectService initialized");
 
             StartupDiagnostics.Write("Creating BrowserBridgeService");
-            var browserBridge = new BrowserBridgeService(loadResult.State, projectService);
+            var codexBridge = new CodexAppServerBridge(loadResult.State);
+            var browserBridge = new BrowserBridgeService(loadResult.State, projectService, codexBridge);
             _browserBridgeServer = new BrowserBridgeServer(browserBridge);
             StartupDiagnostics.Write("BrowserBridgeService initialized");
 
@@ -77,7 +79,8 @@ public partial class App : WpfApplication
                 new WindowsFolderPicker(LocalizationService.Current),
                 new GitRepositoryDetector(),
                 startupWarning,
-                browserBridge);
+                browserBridge,
+                codexBridge);
             StartupDiagnostics.Write("MainViewModel initialized");
 
             var bridgeStartResult = await _browserBridgeServer.StartAsync();
@@ -127,6 +130,11 @@ public partial class App : WpfApplication
         if (_browserBridgeServer is not null)
         {
             await _browserBridgeServer.StopAsync();
+        }
+
+        if (_mainViewModel is not null)
+        {
+            await _mainViewModel.StopCodexAsync();
         }
     }
 
@@ -179,6 +187,10 @@ public partial class App : WpfApplication
         if (_browserBridgeServer is not null)
         {
             await _browserBridgeServer.StopAsync();
+        }
+        if (_mainViewModel is not null)
+        {
+            await _mainViewModel.StopCodexAsync();
         }
         _mainWindow?.CloseFromApplication();
         Shutdown();

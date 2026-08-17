@@ -57,6 +57,46 @@ public sealed class ProjectListItemViewModel : ObservableObject
 
     public string CurrentTaskResult => CurrentTask?.Result ?? string.Empty;
 
+    public string UserNote
+    {
+        get => CurrentTask?.UserNote ?? string.Empty;
+        set
+        {
+            if (CurrentTask is { } task && !string.Equals(task.UserNote ?? string.Empty, value, StringComparison.Ordinal))
+            {
+                task.UserNote = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string ResultNote
+    {
+        get => CurrentTask?.ResultNote ?? string.Empty;
+        set
+        {
+            if (CurrentTask is { } task && !string.Equals(task.ResultNote ?? string.Empty, value, StringComparison.Ordinal))
+            {
+                task.ResultNote = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string TaskPayloadInfo => CurrentTask?.Payload is { } payload
+        ? $"task.md · {FormatLength(payload.Length)}"
+        : string.Empty;
+
+    public string ResultPayloadInfo => CurrentTask?.ResultPayload is { } payload
+        ? $"result.md · {FormatLength(payload.Length)}"
+        : string.Empty;
+
+    public string CodexProgress => Workstream.CodexProgress ?? string.Empty;
+
+    public bool HasCodexProgress => !string.IsNullOrWhiteSpace(CodexProgress);
+
+    public bool CanCancelCodex => IsCodexRunning && CurrentTask is { CodexTurnId: not null };
+
     public RelayTask? CurrentTask => _browserBridge?.FindTaskByWorkstream(Workstream.Id);
 
     public bool HasCurrentTask => CurrentTask is not null;
@@ -123,6 +163,7 @@ public sealed class ProjectListItemViewModel : ObservableObject
         WorkflowState.ReadyForChatGPT => SymbolRegular.ArrowLeft12,
         WorkflowState.ChatGPTReviewing => SymbolRegular.Chat16,
         WorkflowState.Completed => SymbolRegular.CheckmarkCircle12,
+        WorkflowState.NeedsAttention => SymbolRegular.Warning16,
         WorkflowState.Error => SymbolRegular.ErrorCircle12,
         _ => SymbolRegular.Circle12
     };
@@ -162,6 +203,13 @@ public sealed class ProjectListItemViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentTaskText));
         OnPropertyChanged(nameof(CurrentTaskId));
         OnPropertyChanged(nameof(CurrentTaskResult));
+        OnPropertyChanged(nameof(UserNote));
+        OnPropertyChanged(nameof(ResultNote));
+        OnPropertyChanged(nameof(TaskPayloadInfo));
+        OnPropertyChanged(nameof(ResultPayloadInfo));
+        OnPropertyChanged(nameof(CodexProgress));
+        OnPropertyChanged(nameof(HasCodexProgress));
+        OnPropertyChanged(nameof(CanCancelCodex));
         OnPropertyChanged(nameof(CurrentTask));
         OnPropertyChanged(nameof(HasCurrentTask));
         OnPropertyChanged(nameof(HasCurrentResult));
@@ -185,5 +233,14 @@ public sealed class ProjectListItemViewModel : ObservableObject
         OnPropertyChanged(nameof(GuidanceBrush));
         OnPropertyChanged(nameof(PendingLabel));
         OnPropertyChanged(nameof(PendingCount));
+    }
+
+    private static string FormatLength(long length)
+    {
+        return length < 1024
+            ? $"{length} B"
+            : length < 1024 * 1024
+                ? $"{length / 1024d:0.#} KB"
+                : $"{length / 1024d / 1024d:0.#} MB";
     }
 }

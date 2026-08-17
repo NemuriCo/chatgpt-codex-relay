@@ -25,6 +25,13 @@ public static class StateMigration
                     workstream.ProjectId = project.Id;
                     changed = true;
                 }
+
+                if (string.IsNullOrWhiteSpace(workstream.CodexThreadId) &&
+                    !string.IsNullOrWhiteSpace(workstream.CodexSessionId))
+                {
+                    workstream.CodexThreadId = workstream.CodexSessionId;
+                    changed = true;
+                }
             }
 
             if (project.Workstreams.Count == 0)
@@ -40,6 +47,7 @@ public static class StateMigration
                     UpdatedAt = now,
                     ChatGPTTabId = project.LegacyChatGPTTab,
                     CodexSessionId = project.LegacyCodexSessionId,
+                    CodexThreadId = project.LegacyCodexSessionId,
                     CurrentTaskId = project.LegacyCurrentTaskId
                 });
                 changed = true;

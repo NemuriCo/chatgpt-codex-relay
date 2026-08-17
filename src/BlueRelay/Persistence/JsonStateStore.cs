@@ -10,7 +10,7 @@ public sealed class JsonStateStore : IStateStore
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new RelayTaskJsonConverter(), new JsonStringEnumConverter() }
     };
 
     public JsonStateStore(string? filePath = null)

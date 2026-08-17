@@ -22,5 +22,15 @@ public sealed class Workstream
 
     public string? CodexSessionId { get; set; }
 
+    /// <summary>
+    /// Stable Codex App Server thread id owned by this Workstream.
+    /// CodexSessionId remains as a legacy compatibility field for older state files.
+    /// </summary>
+    public string? CodexThreadId { get; set; }
+
+    public string? CodexProgress { get; set; }
+
+    public string? CodexError { get; set; }
+
     public string? CurrentTaskId { get; set; }
 }

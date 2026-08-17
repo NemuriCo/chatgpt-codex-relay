@@ -40,6 +40,29 @@ public sealed class MessageBoxDialogService : IDialogService
         return result == WpfUiMessageBoxResult.Primary;
     }
 
+    public async Task<bool> AskAsync(
+        string title,
+        string message,
+        string acceptLabel,
+        CancellationToken cancellationToken = default)
+    {
+        var messageBox = new WpfUiMessageBox
+        {
+            Owner = GetOwner(),
+            Title = title,
+            Content = message,
+            PrimaryButtonText = acceptLabel,
+            PrimaryButtonAppearance = ControlAppearance.Primary,
+            PrimaryButtonIcon = new SymbolIcon(SymbolRegular.Checkmark16),
+            SecondaryButtonText = _text.Cancel,
+            CloseButtonText = _text.Cancel,
+            ShowTitle = true
+        };
+
+        var result = await messageBox.ShowDialogAsync(cancellationToken: cancellationToken);
+        return result == WpfUiMessageBoxResult.Primary;
+    }
+
     public async Task ShowErrorAsync(string title, string message, CancellationToken cancellationToken = default)
     {
         var messageBox = new WpfUiMessageBox

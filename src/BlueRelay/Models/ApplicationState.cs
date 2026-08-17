@@ -22,5 +22,7 @@ public sealed class ApplicationState
 
     public bool IsWindowCollapsed { get; set; }
 
+    public string? CodexExecutablePath { get; set; }
+
     public BrowserBridgeState BrowserBridge { get; set; } = new();
 }

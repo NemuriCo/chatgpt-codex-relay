@@ -27,6 +27,7 @@ public static class WorkflowStateCatalog
             WorkflowState.ReadyForChatGPT => Create(text.GetStateLabel(state), "←", "#52D5B2", text.GetStateGuidance(state)),
             WorkflowState.ChatGPTReviewing => Create(text.GetStateLabel(state), "◒", "#F1C75B", text.GetStateGuidance(state)),
             WorkflowState.Completed => Create(text.GetStateLabel(state), "✓", "#62D37F", text.GetStateGuidance(state)),
+            WorkflowState.NeedsAttention => Create(text.GetStateLabel(state), "!", "#FFB454", text.GetStateGuidance(state)),
             WorkflowState.Error => Create(text.GetStateLabel(state), "!", "#FF7272", text.GetStateGuidance(state)),
             _ => Create("?", "?", "#8D96A5", text.GetStateGuidance(WorkflowState.Error))
         };

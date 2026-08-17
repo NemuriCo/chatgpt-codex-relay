@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using BlueRelay.Models;
+using BlueRelay.Persistence;
+using BlueRelay.Services.Codex;
 
 namespace BlueRelay.Services.Bridges;
 
@@ -15,6 +17,8 @@ public sealed class BrowserBridgeService
 
     private readonly ApplicationState _state;
     private readonly ProjectService _projectService;
+    private readonly ICodexBridge? _codexBridge;
+    private readonly RelayPayloadStore _payloadStore;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, HandoffCommand> _handoffCommands = new(StringComparer.Ordinal);
     private string? _pairingCode;
@@ -28,17 +32,33 @@ public sealed class BrowserBridgeService
         string? DeliveryErrorCode,
         DateTimeOffset? UpdatedAt);
 
-    public BrowserBridgeService(ApplicationState state, ProjectService projectService)
+    public BrowserBridgeService(
+        ApplicationState state,
+        ProjectService projectService,
+        ICodexBridge? codexBridge = null,
+        RelayPayloadStore? payloadStore = null)
     {
         _state = state;
         _projectService = projectService;
+        _codexBridge = codexBridge;
+        _payloadStore = payloadStore ?? new RelayPayloadStore(
+            projectService.StateFilePath.StartsWith("memory://", StringComparison.OrdinalIgnoreCase)
+                ? Path.Combine(Path.GetTempPath(), "BlueRelayTests", "relay", Guid.NewGuid().ToString("N"))
+                : null);
         _state.BrowserBridge ??= new BrowserBridgeState();
         _state.BrowserBridge.PairedInstallationIds ??= [];
         _state.BrowserBridge.Bindings ??= [];
         _state.BrowserBridge.Tasks ??= [];
+        HydratePayloads();
+        if (_codexBridge is not null)
+        {
+            _codexBridge.ThreadChanged += CodexBridge_ThreadChanged;
+        }
     }
 
     public event EventHandler? Changed;
+
+    public ICodexBridge? CodexBridge => _codexBridge;
 
     public bool IsPaired => !string.IsNullOrWhiteSpace(_state.BrowserBridge.AuthToken);
 
@@ -384,6 +404,12 @@ public sealed class BrowserBridgeService
                 UpdatedAt = DateTimeOffset.UtcNow,
                 Status = RelayTaskStatus.Captured
             };
+            task.Payload = await _payloadStore.WriteAsync(
+                workstream.Id,
+                task.Id,
+                "task.md",
+                prompt,
+                cancellationToken).ConfigureAwait(false);
             var previousTaskId = workstream.CurrentTaskId;
             _state.BrowserBridge.Tasks.Add(task);
             workstream.CurrentTaskId = task.Id.ToString("D");
@@ -425,6 +451,226 @@ public sealed class BrowserBridgeService
         return await ChangeTaskStateAsync(taskId, WorkflowState.CodexRunning, RelayTaskStatus.CodexRunning, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<BridgeOperationResult<RelayTask>> SendTaskToCodexAsync(
+        Guid taskId,
+        string? userNote = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_codexBridge is null)
+        {
+            return Failure<RelayTask>("codex_unavailable", "The real Codex App Server bridge is not configured.");
+        }
+
+        RelayTask? task;
+        Project? project;
+        Workstream? workstream;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            task = FindTask(taskId);
+            workstream = task is null ? null : _projectService.FindWorkstreamForId(task.WorkstreamId);
+            project = workstream is null ? null : _projectService.Find(workstream.ProjectId);
+            if (task is null || workstream is null || project is null)
+            {
+                return Failure<RelayTask>("task_not_found", "The task or Workstream no longer exists.");
+            }
+
+            if (!IsCurrentTask(workstream, task) || workstream.CurrentState != WorkflowState.ReadyForCodex)
+            {
+                return Failure<RelayTask>("task_not_ready", "Only the current task in ReadyForCodex can be sent to Codex.");
+            }
+
+            task.UserNote = string.IsNullOrWhiteSpace(userNote) ? null : userNote.Trim();
+            task.CodexError = null;
+            task.Status = RelayTaskStatus.CodexRunning;
+            task.UpdatedAt = DateTimeOffset.UtcNow;
+            workstream.CodexProgress = "准备启动 Codex";
+            workstream.CodexError = null;
+            var stateResult = await _projectService.TryChangeStateAsync(
+                workstream.ProjectId,
+                workstream.Id,
+                WorkflowState.CodexRunning,
+                manualOverride: false,
+                cancellationToken).ConfigureAwait(false);
+            if (!stateResult.Success)
+            {
+                return Failure<RelayTask>("state_transition_failed", stateResult.Error);
+            }
+
+            var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+            if (!saveResult.Success)
+            {
+                return Failure<RelayTask>("persistence_failed", saveResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        var combinedPrompt = RelayPromptComposer.Compose(task!.UserNote, task.Prompt);
+        CodexTurnResult codexResult;
+        try
+        {
+            codexResult = await _codexBridge.SubmitTaskAsync(
+                new CodexTaskRequest(project!, workstream!, task, combinedPrompt),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            codexResult = new CodexTurnResult(false, workstream!.CodexThreadId, task.CodexTurnId, null, exception.Message);
+        }
+
+        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            var currentTask = FindTask(taskId);
+            var currentWorkstream = currentTask is null ? null : _projectService.FindWorkstreamForId(currentTask.WorkstreamId);
+            if (currentTask is null || currentWorkstream is null)
+            {
+                return Failure<RelayTask>("task_not_found", "The task or Workstream no longer exists.");
+            }
+
+            currentWorkstream.CodexProgress = codexResult.Success ? "Codex 已完成" : null;
+            currentWorkstream.CodexError = codexResult.Error;
+            currentTask.CodexTurnId = codexResult.TurnId;
+            currentTask.CodexError = codexResult.Error;
+            if (!string.IsNullOrWhiteSpace(codexResult.ThreadId))
+            {
+                currentWorkstream.CodexThreadId = codexResult.ThreadId;
+                currentWorkstream.CodexSessionId = codexResult.ThreadId;
+            }
+
+            if (codexResult.Success && !string.IsNullOrWhiteSpace(codexResult.Result))
+            {
+                currentTask.Result = codexResult.Result.Trim();
+                currentTask.ResultPayload = await _payloadStore.WriteAsync(
+                    currentWorkstream.Id,
+                    currentTask.Id,
+                    "result.md",
+                    currentTask.Result,
+                    CancellationToken.None).ConfigureAwait(false);
+                currentTask.Status = RelayTaskStatus.ReadyForChatGPT;
+                currentTask.DeliveryStatus = RelayCommandDeliveryStatus.None;
+                currentTask.DeliveryErrorCode = null;
+                currentTask.UpdatedAt = DateTimeOffset.UtcNow;
+                var stateResult = await _projectService.TryChangeStateAsync(
+                    currentWorkstream.ProjectId,
+                    currentWorkstream.Id,
+                    WorkflowState.ReadyForChatGPT,
+                    manualOverride: false,
+                    CancellationToken.None).ConfigureAwait(false);
+                if (!stateResult.Success)
+                {
+                    currentTask.Status = RelayTaskStatus.Error;
+                    currentTask.CodexError = stateResult.Error;
+                    currentWorkstream.CodexError = stateResult.Error;
+                }
+            }
+            else
+            {
+                currentTask.Status = RelayTaskStatus.Error;
+                currentTask.UpdatedAt = DateTimeOffset.UtcNow;
+                var targetState = codexResult.Cancelled ? WorkflowState.NeedsAttention : WorkflowState.Error;
+                var stateResult = await _projectService.TryChangeStateAsync(
+                    currentWorkstream.ProjectId,
+                    currentWorkstream.Id,
+                    targetState,
+                    manualOverride: false,
+                    CancellationToken.None).ConfigureAwait(false);
+                if (!stateResult.Success)
+                {
+                    currentWorkstream.CurrentState = targetState;
+                }
+            }
+
+            var saveResult = await _projectService.TrySaveAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!saveResult.Success)
+            {
+                return Failure<RelayTask>("persistence_failed", saveResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
+            return codexResult.Success
+                ? new BridgeOperationResult<RelayTask>(true, currentTask)
+                : new BridgeOperationResult<RelayTask>(false, currentTask, codexResult.Cancelled ? "codex_cancelled" : "codex_failed", codexResult.Error ?? "Codex did not return a result.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<BridgeOperationResult> CancelCodexTaskAsync(
+        Guid workstreamId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_codexBridge is null)
+        {
+            return Failure("codex_unavailable", "The real Codex App Server bridge is not configured.");
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        string? threadId;
+        string? turnId;
+        try
+        {
+            var workstream = _projectService.FindWorkstreamForId(workstreamId);
+            var task = workstream is null ? null : FindCurrentTask(workstream);
+            threadId = workstream?.CodexThreadId;
+            turnId = task?.CodexTurnId;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        if (string.IsNullOrWhiteSpace(threadId) || string.IsNullOrWhiteSpace(turnId))
+        {
+            return Failure("codex_turn_not_found", "There is no active Codex turn to cancel.");
+        }
+
+        return await _codexBridge.InterruptAsync(threadId, turnId, cancellationToken).ConfigureAwait(false)
+            ? new BridgeOperationResult(true)
+            : Failure("codex_cancel_failed", "BlueRelay could not cancel the Codex turn.");
+    }
+
+    public async Task<BridgeOperationResult> ResetCodexThreadAsync(
+        Guid workstreamId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_codexBridge is null)
+        {
+            return Failure("codex_unavailable", "The real Codex App Server bridge is not configured.");
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var workstream = _projectService.FindWorkstreamForId(workstreamId);
+            if (workstream is null)
+            {
+                return Failure("workstream_not_found", "The selected Workstream no longer exists.");
+            }
+
+            await _codexBridge.ResetThreadAsync(workstream, cancellationToken).ConfigureAwait(false);
+            var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+            if (!saveResult.Success)
+            {
+                return Failure("persistence_failed", saveResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
+            return new BridgeOperationResult(true);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<BridgeOperationResult<RelayTask>> SimulateResultAsync(
         Guid taskId,
         string result,
@@ -460,6 +706,12 @@ public sealed class BrowserBridgeService
             var previousDeliveryStatus = task.DeliveryStatus;
             var previousDeliveryErrorCode = task.DeliveryErrorCode;
             task.Result = result.Trim();
+            task.ResultPayload = await _payloadStore.WriteAsync(
+                workstream.Id,
+                task.Id,
+                "result.md",
+                task.Result,
+                cancellationToken).ConfigureAwait(false);
             task.Status = RelayTaskStatus.ReadyForChatGPT;
             task.DeliveryStatus = RelayCommandDeliveryStatus.None;
             task.DeliveryErrorCode = null;
@@ -534,7 +786,7 @@ public sealed class BrowserBridgeService
                 task.WorkstreamId,
                 binding.TabId,
                 binding.ChatGPTUrl,
-                task.Result,
+                RelayPromptComposer.ComposeResult(task.ResultNote, task.Result),
                 RelayCommandDeliveryStatus.Queued,
                 0,
                 null);
@@ -1035,5 +1287,33 @@ public sealed class BrowserBridgeService
     private static string NormalizeDeliveryErrorCode(string? errorCode)
     {
         return string.IsNullOrWhiteSpace(errorCode) ? "injection_failed" : errorCode.Trim();
+    }
+
+    private void HydratePayloads()
+    {
+        foreach (var task in _state.BrowserBridge.Tasks)
+        {
+            if (task.Payload is not null && string.IsNullOrEmpty(task.Prompt))
+            {
+                task.Prompt = _payloadStore.Read(task.Payload) ?? string.Empty;
+            }
+
+            if (task.ResultPayload is not null && string.IsNullOrEmpty(task.Result))
+            {
+                task.Result = _payloadStore.Read(task.ResultPayload);
+            }
+        }
+    }
+
+    private async void CodexBridge_ThreadChanged(object? sender, CodexThreadUpdate update)
+    {
+        try
+        {
+            await _projectService.TrySaveAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // The active turn will report the final persistence failure if needed.
+        }
     }
 }

@@ -19,6 +19,8 @@ public sealed class ProjectService
 
     public event EventHandler? Changed;
 
+    public string StateFilePath => _stateStore.FilePath;
+
     public IReadOnlyList<Project> Projects => _state.Projects;
 
     public async Task<ProjectMutationResult> TryCreateAsync(
