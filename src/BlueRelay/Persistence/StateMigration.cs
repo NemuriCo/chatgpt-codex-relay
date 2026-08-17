@@ -8,7 +8,9 @@ public static class StateMigration
 
     public static bool Migrate(ApplicationState state)
     {
-        var changed = state.SchemaVersion < CurrentSchemaVersion;
+        var sourceSchemaVersion = state.SchemaVersion;
+        var canMigrateLegacyCodexSession = sourceSchemaVersion < CurrentSchemaVersion;
+        var changed = canMigrateLegacyCodexSession;
         state.Projects ??= [];
         state.BrowserBridge ??= new BrowserBridgeState();
         state.BrowserBridge.PairedInstallationIds ??= [];
@@ -26,7 +28,8 @@ public static class StateMigration
                     changed = true;
                 }
 
-                if (string.IsNullOrWhiteSpace(workstream.CodexThreadId) &&
+                if (canMigrateLegacyCodexSession &&
+                    string.IsNullOrWhiteSpace(workstream.CodexThreadId) &&
                     !string.IsNullOrWhiteSpace(workstream.CodexSessionId))
                 {
                     workstream.CodexThreadId = workstream.CodexSessionId;
@@ -89,8 +92,8 @@ public static class StateMigration
                     CreatedAt = project.CreatedAt == default ? now : project.CreatedAt,
                     UpdatedAt = now,
                     ChatGPTTabId = project.LegacyChatGPTTab,
-                    CodexSessionId = project.LegacyCodexSessionId,
-                    CodexThreadId = project.LegacyCodexSessionId,
+                    CodexSessionId = canMigrateLegacyCodexSession ? project.LegacyCodexSessionId : null,
+                    CodexThreadId = canMigrateLegacyCodexSession ? project.LegacyCodexSessionId : null,
                     CurrentTaskId = project.LegacyCurrentTaskId
                 });
                 changed = true;

@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using BlueRelay.Localization;
 using BlueRelay.Models;
 using BlueRelay.Persistence;
+using BlueRelay.Presentation.ViewModels;
 using BlueRelay.Services;
 using BlueRelay.Services.Bridges;
 using BlueRelay.Services.Codex;
@@ -372,6 +374,64 @@ public sealed class BrowserBridgeTests
         Assert.AreEqual("codex_thread_archived", workstream.CodexErrorCode);
     }
 
+    [TestMethod]
+    public async Task NewCodexSessionClearsPersistedBindingKeepsTaskAndRefreshesUi()
+    {
+        var statePath = Path.Combine(_testDirectory, "state.json");
+        var state = new ApplicationState();
+        var store = new JsonStateStore(statePath);
+        var projectService = new ProjectService(state, store, new WorkflowStateMachine());
+        var codex = new FakeCodexBridge(new CodexTurnResult(true, "new-thread", null, "result"));
+        var bridge = new BrowserBridgeService(state, projectService, codex);
+        var project = (await projectService.TryCreateAsync("Reset binding", _testDirectory)).Project!;
+        var workstream = project.Workstreams[0];
+        workstream.CodexThreadId = "old-thread";
+        workstream.CodexSessionId = "old-thread";
+        workstream.CodexError = "old thread failed";
+        workstream.CodexErrorCode = "codex_thread_conflict";
+        workstream.CurrentState = WorkflowState.NeedsAttention;
+        var task = new RelayTask
+        {
+            WorkstreamId = workstream.Id,
+            Prompt = "# CODEX_TASK\nKeep me",
+            UserNote = "Keep this note"
+        };
+        state.BrowserBridge.Tasks.Add(task);
+        workstream.CurrentTaskId = task.Id.ToString("D");
+        await projectService.TrySaveAsync();
+
+        var item = new ProjectListItemViewModel(
+            project,
+            workstream,
+            LocalizationService.ForCulture(new System.Globalization.CultureInfo("zh-CN")),
+            bridge);
+        var changed = false;
+        bridge.Changed += (_, _) =>
+        {
+            changed = true;
+            item.Refresh();
+        };
+
+        var result = await bridge.ResetCodexThreadAsync(workstream.Id);
+
+        Assert.IsTrue(result.Success, result.Error);
+        Assert.IsTrue(changed);
+        Assert.IsNull(workstream.CodexThreadId);
+        Assert.IsNull(workstream.CodexSessionId);
+        Assert.IsNull(workstream.CodexError);
+        Assert.IsNull(workstream.CodexErrorCode);
+        Assert.AreEqual(task.Id.ToString("D"), workstream.CurrentTaskId);
+        Assert.AreEqual(task, bridge.FindCurrentTask(workstream.Id));
+        Assert.AreEqual("未绑定 Codex 会话", item.CodexPairingText);
+
+        var reloaded = await store.LoadAsync();
+        var reloadedWorkstream = reloaded.State.Projects.Single().Workstreams.Single();
+        Assert.IsNull(reloadedWorkstream.CodexThreadId);
+        Assert.IsNull(reloadedWorkstream.CodexSessionId);
+        Assert.AreEqual(task.Id.ToString("D"), reloadedWorkstream.CurrentTaskId);
+        Assert.AreEqual("Keep this note", reloaded.State.BrowserBridge.Tasks.Single().UserNote);
+    }
+
     private static async Task RegisterAndBindAsync(BrowserBridgeService bridge, string tabId, Guid workstreamId)
     {
         var register = await bridge.RegisterTabAsync(new RegisterTabRequest(
@@ -457,7 +517,15 @@ public sealed class BrowserBridgeTests
             System.Text.Json.JsonElement? parameters = null,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public Task ResetThreadAsync(Workstream workstream, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task ResetThreadAsync(Workstream workstream, CancellationToken cancellationToken = default)
+        {
+            workstream.CodexThreadId = null;
+            workstream.CodexSessionId = null;
+            workstream.CodexProgress = null;
+            workstream.CodexError = null;
+            workstream.CodexErrorCode = null;
+            return Task.CompletedTask;
+        }
 
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }

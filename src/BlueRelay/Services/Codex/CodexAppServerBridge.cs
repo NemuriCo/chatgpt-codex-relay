@@ -59,6 +59,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
     private readonly CodexDiagnosticBuffer _diagnostics = new();
     private readonly SemaphoreSlim _startGate = new(1, 1);
     private readonly object _attachmentGate = new();
+    private readonly object _detachGate = new();
     private readonly HashSet<string> _attachedThreadIds = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _workstreamGates = new();
     private readonly ConcurrentDictionary<string, ActiveTurn> _activeTurns = new(StringComparer.Ordinal);
@@ -69,6 +70,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
     private int _disconnectHandled;
     private int _stopping;
     private long _connectionGeneration;
+    private Task _detachTask = Task.CompletedTask;
 
     public CodexAppServerBridge(
         ApplicationState state,
@@ -257,48 +259,76 @@ public sealed class CodexAppServerBridge : ICodexBridge
     public Task ResetThreadAsync(Workstream workstream, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var previousThreadId = workstream.CodexThreadId;
         workstream.CodexThreadId = null;
         workstream.CodexSessionId = null;
         workstream.CodexProgress = null;
         workstream.CodexError = null;
         workstream.CodexErrorCode = null;
+        if (!string.IsNullOrWhiteSpace(previousThreadId))
+        {
+            lock (_attachmentGate)
+            {
+                _attachedThreadIds.Remove(previousThreadId);
+            }
+
+            UpdateAttachedThreadDiagnostics();
+            _diagnostics.Add(
+                $"thread binding reset workstream={workstream.Id:N} oldThread={ShortIdentity(previousThreadId)} generation={_connectionGeneration}");
+            RaiseDiagnosticsChanged();
+        }
+
         return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         Interlocked.Exchange(ref _stopping, 1);
-        var protocol = Interlocked.Exchange(ref _protocol, null);
-        if (protocol is not null)
+        await _startGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
         {
-            await protocol.DisposeAsync().ConfigureAwait(false);
-        }
+            await WaitForPendingDetachAsync().ConfigureAwait(false);
+            var protocol = Interlocked.Exchange(ref _protocol, null);
+            if (protocol is not null)
+            {
+                await protocol.DisposeAsync().ConfigureAwait(false);
+            }
 
-        var process = Interlocked.Exchange(ref _process, null);
-        if (process is not null)
-        {
-            await process.StopAsync(cancellationToken).ConfigureAwait(false);
-            await process.DisposeAsync().ConfigureAwait(false);
-        }
+            var process = Interlocked.Exchange(ref _process, null);
+            if (process is not null)
+            {
+                await process.StopAsync(cancellationToken).ConfigureAwait(false);
+                await process.DisposeAsync().ConfigureAwait(false);
+            }
 
-        foreach (var active in _activeTurns.Values)
-        {
-            active.Completion.TrySetResult(Failure("Codex App Server stopped.", active.ThreadId, active.TurnId));
-        }
+            foreach (var active in _activeTurns.Values)
+            {
+                active.Completion.TrySetResult(Failure("Codex App Server stopped.", active.ThreadId, active.TurnId));
+            }
 
-        _activeTurns.Clear();
-        lock (_attachmentGate)
-        {
-            _attachedThreadIds.Clear();
+            _activeTurns.Clear();
+            lock (_attachmentGate)
+            {
+                _attachedThreadIds.Clear();
+            }
+
+            UpdateAttachedThreadDiagnostics();
+            SetStage("stopped");
+            SetStatus(CodexBridgeStatus.Disconnected);
         }
-        SetStage("stopped");
-        SetStatus(CodexBridgeStatus.Disconnected);
-        Interlocked.Exchange(ref _stopping, 0);
+        finally
+        {
+            _startGate.Release();
+            Interlocked.Exchange(ref _stopping, 0);
+        }
     }
 
     private async Task<CodexProtocolClient> EnsureStartedAsync(CancellationToken cancellationToken)
     {
-        if (_protocol is { } existing && _status != CodexBridgeStatus.Error)
+        if (_protocol is { } existing && _status is
+            CodexBridgeStatus.Connected or
+            CodexBridgeStatus.Running or
+            CodexBridgeStatus.WaitingForApproval)
         {
             return existing;
         }
@@ -306,7 +336,16 @@ public sealed class CodexAppServerBridge : ICodexBridge
         await _startGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_protocol is { } started && _status != CodexBridgeStatus.Error)
+            await WaitForPendingDetachAsync().ConfigureAwait(false);
+            if (Volatile.Read(ref _stopping) != 0)
+            {
+                throw new InvalidOperationException("Codex App Server is stopping.");
+            }
+
+            if (_protocol is { } started && _status is
+                CodexBridgeStatus.Connected or
+                CodexBridgeStatus.Running or
+                CodexBridgeStatus.WaitingForApproval)
             {
                 return started;
             }
@@ -329,30 +368,37 @@ public sealed class CodexAppServerBridge : ICodexBridge
             RaiseDiagnosticsChanged();
 
             var process = ProcessFactory(executable.Path!);
-            process.DiagnosticOutput += Process_DiagnosticOutput;
-            process.Exited += Process_Exited;
-            await process.StartAsync(cancellationToken).ConfigureAwait(false);
-            var generation = Interlocked.Increment(ref _connectionGeneration);
-            lock (_attachmentGate)
-            {
-                _attachedThreadIds.Clear();
-            }
-            _diagnostics.SetGeneration(generation);
-            _diagnostics.Add($"process generation started: {generation}");
-            _diagnostics.SetProcess(process.ProcessId);
-            RaiseDiagnosticsChanged();
-
-            var protocol = new CodexProtocolClient(process.Output!, process.Input!);
-            protocol.NotificationReceived += Protocol_NotificationReceived;
-            protocol.ServerRequestReceived += Protocol_ServerRequestReceived;
-            protocol.Disconnected += Protocol_Disconnected;
-            protocol.Diagnostic += Protocol_Diagnostic;
-            _process = process;
-            _protocol = protocol;
-            protocol.Start();
-
+            CodexProtocolClient? protocol = null;
             try
             {
+                process.DiagnosticOutput += Process_DiagnosticOutput;
+                process.Exited += Process_Exited;
+                _process = process;
+                await process.StartAsync(cancellationToken).ConfigureAwait(false);
+                if (process.Output is null || process.Input is null)
+                {
+                    throw new InvalidOperationException("The Codex App Server process did not expose stdio after starting.");
+                }
+
+                var generation = Interlocked.Increment(ref _connectionGeneration);
+                lock (_attachmentGate)
+                {
+                    _attachedThreadIds.Clear();
+                }
+                UpdateAttachedThreadDiagnostics();
+                _diagnostics.SetGeneration(generation);
+                _diagnostics.Add($"process generation started: {generation}");
+                _diagnostics.SetProcess(process.ProcessId);
+                RaiseDiagnosticsChanged();
+
+                protocol = new CodexProtocolClient(process.Output, process.Input);
+                protocol.NotificationReceived += Protocol_NotificationReceived;
+                protocol.ServerRequestReceived += Protocol_ServerRequestReceived;
+                protocol.Disconnected += Protocol_Disconnected;
+                protocol.Diagnostic += Protocol_Diagnostic;
+                _protocol = protocol;
+                protocol.Start();
+
                 SetStage("initialize");
                 var initialize = await protocol.RequestAsync(
                     "initialize",
@@ -378,7 +424,8 @@ public sealed class CodexAppServerBridge : ICodexBridge
             {
                 var error = FormatFailure(exception);
                 SetError(error);
-                var ownedProtocol = ReferenceEquals(Interlocked.CompareExchange(ref _protocol, null, protocol), protocol)
+                var ownedProtocol = protocol is not null &&
+                    ReferenceEquals(Interlocked.CompareExchange(ref _protocol, null, protocol), protocol)
                     ? protocol
                     : null;
                 var ownedProcess = ReferenceEquals(Interlocked.CompareExchange(ref _process, null, process), process)
@@ -421,7 +468,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
                 if (_attachedThreadIds.Contains(existingThreadId))
                 {
                     SetStage("thread_attached");
-                    AddRoutingDiagnostic(request.Workstream, existingThreadId, "already_attached");
+                    AddRoutingDiagnostic(request.Workstream, existingThreadId, "thread_attached");
                     return existingThreadId;
                 }
             }
@@ -443,6 +490,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
             }
             catch (CodexProtocolException exception) when (IsActiveWriterConflict(exception))
             {
+                AddActiveWriterDiagnostic(existingThreadId);
                 throw new CodexThreadConflictException(
                     existingThreadId,
                     "Codex session is being used by another process. BlueRelay could not obtain its writer ownership.");
@@ -452,7 +500,8 @@ public sealed class CodexAppServerBridge : ICodexBridge
             {
                 _attachedThreadIds.Add(existingThreadId);
             }
-            AddRoutingDiagnostic(request.Workstream, existingThreadId, "resumed");
+            UpdateAttachedThreadDiagnostics();
+            AddRoutingDiagnostic(request.Workstream, existingThreadId, "thread_resume");
             return existingThreadId;
         }
 
@@ -479,7 +528,8 @@ public sealed class CodexAppServerBridge : ICodexBridge
         {
             _attachedThreadIds.Add(threadId);
         }
-        AddRoutingDiagnostic(request.Workstream, threadId, "started");
+        UpdateAttachedThreadDiagnostics();
+        AddRoutingDiagnostic(request.Workstream, threadId, "thread_start");
         try
         {
             ThreadChanged?.Invoke(this, new CodexThreadUpdate(request.Workstream.Id, threadId));
@@ -677,10 +727,11 @@ public sealed class CodexAppServerBridge : ICodexBridge
         {
             _attachedThreadIds.Clear();
         }
+        UpdateAttachedThreadDiagnostics();
         SetStatus(CodexBridgeStatus.Error);
-        _ = DetachConnectionAsync(
+        QueueDetachConnection(
             ReferenceEquals(source, protocol) ? null : protocol,
-            ReferenceEquals(source, process) ? null : process);
+            process);
     }
 
     private async Task DetachConnectionAsync(
@@ -696,6 +747,56 @@ public sealed class CodexAppServerBridge : ICodexBridge
         {
             await process.StopAsync(CancellationToken.None).ConfigureAwait(false);
             await process.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private void QueueDetachConnection(
+        CodexProtocolClient? protocol,
+        ICodexAppServerProcess? process)
+    {
+        if (protocol is null && process is null)
+        {
+            return;
+        }
+
+        lock (_detachGate)
+        {
+            _detachTask = DetachAfterPreviousAsync(_detachTask, protocol, process);
+        }
+    }
+
+    private async Task WaitForPendingDetachAsync()
+    {
+        Task detachTask;
+        lock (_detachGate)
+        {
+            detachTask = _detachTask;
+        }
+
+        await detachTask.ConfigureAwait(false);
+    }
+
+    private async Task DetachAfterPreviousAsync(
+        Task previous,
+        CodexProtocolClient? protocol,
+        ICodexAppServerProcess? process)
+    {
+        try
+        {
+            await previous.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            Protocol_Diagnostic(this, $"previous_detach_error: {exception.GetType().Name}: {exception.Message}");
+        }
+
+        try
+        {
+            await DetachConnectionAsync(protocol, process).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            Protocol_Diagnostic(this, $"detach_error: {exception.GetType().Name}: {exception.Message}");
         }
     }
 
@@ -879,8 +980,32 @@ public sealed class CodexAppServerBridge : ICodexBridge
             ? "unknown"
             : ShortIdentity(workstream.ChatGPTConversationId);
         var tab = string.IsNullOrWhiteSpace(workstream.ChatGPTTabId) ? "unknown" : workstream.ChatGPTTabId;
+        var snapshot = _diagnostics.Snapshot();
         _diagnostics.Add(
-            $"routing workstream={workstream.Id:N} chatgptConversation={conversation} tab={tab} codexThread={ShortIdentity(threadId)} generation={_connectionGeneration} codexAttachment={decision}");
+            $"routing decision: {decision} workstream={workstream.Id:N} chatgptConversation={conversation} tab={tab} codexThread={ShortIdentity(threadId)} process={snapshot.ProcessId?.ToString() ?? "unknown"} generation={_connectionGeneration}");
+        RaiseDiagnosticsChanged();
+    }
+
+    private void AddActiveWriterDiagnostic(string requestedThreadId)
+    {
+        var snapshot = _diagnostics.Snapshot();
+        var attachedThreads = snapshot.AttachedThreadIds is { Count: > 0 }
+            ? string.Join(",", snapshot.AttachedThreadIds.Select(ShortIdentity))
+            : "none";
+        _diagnostics.Add(
+            $"active writer conflict requestedThread={ShortIdentity(requestedThreadId)} process={snapshot.ProcessId?.ToString() ?? "unknown"} generation={snapshot.ProcessGeneration?.ToString() ?? "unknown"} attachedThreads={attachedThreads}");
+        RaiseDiagnosticsChanged();
+    }
+
+    private void UpdateAttachedThreadDiagnostics()
+    {
+        string[] attachedThreads;
+        lock (_attachmentGate)
+        {
+            attachedThreads = _attachedThreadIds.ToArray();
+        }
+
+        _diagnostics.SetAttachedThreadIds(attachedThreads);
         RaiseDiagnosticsChanged();
     }
 

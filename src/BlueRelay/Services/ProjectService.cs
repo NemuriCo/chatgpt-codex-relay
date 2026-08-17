@@ -8,6 +8,7 @@ public sealed class ProjectService
     private readonly ApplicationState _state;
     private readonly IStateStore _stateStore;
     private readonly WorkflowStateMachine _stateMachine;
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     public ProjectService(ApplicationState state, IStateStore stateStore, WorkflowStateMachine stateMachine)
     {
@@ -313,6 +314,7 @@ public sealed class ProjectService
 
     private async Task<ProjectMutationResult> TryPersistAsync(CancellationToken cancellationToken)
     {
+        await _saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await _stateStore.SaveAsync(_state, cancellationToken);
@@ -323,6 +325,10 @@ public sealed class ProjectService
             return new ProjectMutationResult(
                 false,
                 $"BlueRelay could not save its local state. Details: {exception.Message}");
+        }
+        finally
+        {
+            _saveGate.Release();
         }
     }
 }

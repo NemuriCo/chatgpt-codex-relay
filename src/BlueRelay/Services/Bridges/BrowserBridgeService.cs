@@ -21,6 +21,7 @@ public sealed class BrowserBridgeService
     private readonly RelayPayloadStore _payloadStore;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, HandoffCommand> _handoffCommands = new(StringComparer.Ordinal);
+    private readonly Dictionary<Guid, long> _codexBindingRevisions = new();
     private string? _pairingCode;
     private DateTimeOffset? _pairingCodeExpiresAt;
 
@@ -567,6 +568,8 @@ public sealed class BrowserBridgeService
         RelayTask? task;
         Project? project;
         Workstream? workstream;
+        string? initialCodexThreadId;
+        long codexBindingRevision;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -585,6 +588,8 @@ public sealed class BrowserBridgeService
             }
 
             task.UserNote = string.IsNullOrWhiteSpace(userNote) ? null : userNote.Trim();
+            initialCodexThreadId = workstream.CodexThreadId;
+            codexBindingRevision = GetCodexBindingRevision(workstream.Id);
             task.CodexError = null;
             task.Status = RelayTaskStatus.CodexRunning;
             task.UpdatedAt = DateTimeOffset.UtcNow;
@@ -649,7 +654,9 @@ public sealed class BrowserBridgeService
             currentWorkstream.CodexErrorCode = codexResult.ErrorCode;
             currentTask.CodexTurnId = codexResult.TurnId;
             currentTask.CodexError = codexResult.Error;
-            if (!string.IsNullOrWhiteSpace(codexResult.ThreadId))
+            if (!string.IsNullOrWhiteSpace(codexResult.ThreadId) &&
+                GetCodexBindingRevision(currentWorkstream.Id) == codexBindingRevision &&
+                string.Equals(currentWorkstream.CodexThreadId, initialCodexThreadId, StringComparison.Ordinal))
             {
                 currentWorkstream.CodexThreadId = codexResult.ThreadId;
                 currentWorkstream.CodexSessionId = codexResult.ThreadId;
@@ -778,6 +785,7 @@ public sealed class BrowserBridgeService
                 return Failure("workstream_not_found", "The selected Workstream no longer exists.");
             }
 
+            AdvanceCodexBindingRevision(workstream.Id);
             await _codexBridge.ResetThreadAsync(workstream, cancellationToken).ConfigureAwait(false);
             var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
             if (!saveResult.Success)
@@ -1598,11 +1606,38 @@ public sealed class BrowserBridgeService
     {
         try
         {
-            await _projectService.TrySaveAsync().ConfigureAwait(false);
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                var workstream = _projectService.FindWorkstreamForId(update.WorkstreamId);
+                if (workstream is null ||
+                    !string.Equals(workstream.CodexThreadId, update.ThreadId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                await _projectService.TrySaveAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
         }
         catch
         {
             // The active turn will report the final persistence failure if needed.
         }
+    }
+
+    private long GetCodexBindingRevision(Guid workstreamId)
+    {
+        return _codexBindingRevisions.TryGetValue(workstreamId, out var revision) ? revision : 0;
+    }
+
+    private long AdvanceCodexBindingRevision(Guid workstreamId)
+    {
+        var revision = GetCodexBindingRevision(workstreamId) + 1;
+        _codexBindingRevisions[workstreamId] = revision;
+        return revision;
     }
 }

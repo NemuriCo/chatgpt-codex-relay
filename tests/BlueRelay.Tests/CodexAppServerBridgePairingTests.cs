@@ -65,6 +65,10 @@ public sealed class CodexAppServerBridgePairingTests
         Assert.AreEqual("thread-existing", result.ThreadId);
         Assert.AreEqual("thread-existing", fixture.Workstream.CodexThreadId);
         Assert.AreEqual(1, factory.Processes.Single().Methods.Count(method => method == "thread/resume"));
+        Assert.AreEqual(0, factory.Processes.Single().Methods.Count(method => method == "thread/start"));
+        StringAssert.Contains(
+            string.Join(Environment.NewLine, bridge.Diagnostics.RecentMessages),
+            "active writer conflict");
         StringAssert.Contains(result.Error, "another process");
     }
 
@@ -102,6 +106,52 @@ public sealed class CodexAppServerBridgePairingTests
         var process = factory.Processes.Single();
         Assert.AreEqual(FindGitRoot(Directory.GetCurrentDirectory()), process.ThreadStartCwd);
         Assert.IsFalse(process.ThreadStartParams?.TryGetProperty("threadSource", out _) == true);
+    }
+
+    [TestMethod]
+    public async Task ResetClearsBindingAndNextTurnStartsDifferentThread()
+    {
+        var fixture = CreateFixture();
+        var factory = new FakeProcessFactory();
+        var bridge = new CodexAppServerBridge(fixture.State, new FakeExecutableLocator(), _ => factory.Create());
+
+        var first = await bridge.SubmitTaskAsync(fixture.Request("old thread"));
+        Assert.IsTrue(first.Success, first.Error);
+        var oldThreadId = first.ThreadId;
+
+        await bridge.ResetThreadAsync(fixture.Workstream);
+
+        Assert.IsNull(fixture.Workstream.CodexThreadId);
+        Assert.IsNull(fixture.Workstream.CodexSessionId);
+
+        var second = await bridge.SubmitTaskAsync(fixture.Request("fresh thread"));
+        Assert.IsTrue(second.Success, second.Error);
+        Assert.IsNotNull(second.ThreadId);
+        Assert.AreNotEqual(oldThreadId, second.ThreadId);
+        Assert.AreEqual(2, factory.Processes.Single().Methods.Count(method => method == "thread/start"));
+        Assert.AreEqual(0, factory.Processes.Single().Methods.Count(method => method == "thread/resume"));
+        StringAssert.Contains(
+            string.Join(Environment.NewLine, bridge.Diagnostics.RecentMessages),
+            "routing decision: thread_start");
+        Assert.IsTrue(bridge.Diagnostics.AttachedThreadIds?.Contains(second.ThreadId) == true);
+    }
+
+    [TestMethod]
+    public async Task StopDisposesTheOwnedProcessAndAllowsOneNewGeneration()
+    {
+        var fixture = CreateFixture();
+        var factory = new FakeProcessFactory();
+        var bridge = new CodexAppServerBridge(fixture.State, new FakeExecutableLocator(), _ => factory.Create());
+
+        Assert.IsTrue((await bridge.SubmitTaskAsync(fixture.Request("first"))).Success);
+        await bridge.StopAsync();
+
+        Assert.AreEqual(1, factory.Processes.Count);
+        Assert.IsTrue(factory.Processes[0].StopCount > 0);
+        Assert.AreEqual(0, bridge.Diagnostics.AttachedThreadIds?.Count ?? 0);
+
+        Assert.IsTrue((await bridge.SubmitTaskAsync(fixture.Request("second"))).Success);
+        Assert.AreEqual(2, factory.Processes.Count);
     }
 
     private static Fixture CreateFixture()
@@ -208,6 +258,8 @@ public sealed class CodexAppServerBridgePairingTests
 
         public List<string> Methods { get; } = [];
 
+        public int StopCount { get; private set; }
+
         public JsonElement? ThreadStartParams { get; private set; }
 
         public string? ThreadStartCwd => ThreadStartParams is { } parameters &&
@@ -227,6 +279,7 @@ public sealed class CodexAppServerBridgePairingTests
 
         public Task StopAsync(CancellationToken cancellationToken = default)
         {
+            StopCount++;
             _stopped = true;
             _outputLines.Writer.TryComplete();
             return Task.CompletedTask;

@@ -114,6 +114,24 @@ public sealed class JsonStateStoreTests
     }
 
     [TestMethod]
+    public async Task CurrentStateDoesNotRestoreLegacyCodexSessionAfterBindingReset()
+    {
+        var path = Path.Combine(_testDirectory, "state.json");
+        Directory.CreateDirectory(_testDirectory);
+        var projectId = Guid.NewGuid();
+        var workstreamId = Guid.NewGuid();
+        await File.WriteAllTextAsync(
+            path,
+            $$"""{"SchemaVersion":4,"Projects":[{"Id":"{{projectId}}","Name":"Current","LocalPath":"C:\\Current","Workstreams":[{"Id":"{{workstreamId}}","ProjectId":"{{projectId}}","CodexThreadId":null,"CodexSessionId":"old-thread"}]}]}""");
+
+        var result = await new JsonStateStore(path).LoadAsync();
+
+        Assert.IsFalse(result.WasMigrated);
+        Assert.IsNull(result.State.Projects[0].Workstreams[0].CodexThreadId);
+        Assert.AreEqual("old-thread", result.State.Projects[0].Workstreams[0].CodexSessionId);
+    }
+
+    [TestMethod]
     public async Task WindowSettingsRoundTripWithState()
     {
         var path = Path.Combine(_testDirectory, "state.json");

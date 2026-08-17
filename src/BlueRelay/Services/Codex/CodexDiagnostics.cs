@@ -8,7 +8,8 @@ public sealed record CodexDiagnosticSnapshot(
     string Stage,
     string? ErrorMessage,
     IReadOnlyList<string> RecentMessages,
-    long? ProcessGeneration = null)
+    long? ProcessGeneration = null,
+    IReadOnlyList<string>? AttachedThreadIds = null)
 {
     public string ToDisplayText()
     {
@@ -31,6 +32,11 @@ public sealed record CodexDiagnosticSnapshot(
         if (ProcessGeneration is not null)
         {
             lines.Add($"generation: {ProcessGeneration}");
+        }
+
+        if (AttachedThreadIds is { Count: > 0 })
+        {
+            lines.Add($"attached threads: {string.Join(", ", AttachedThreadIds)}");
         }
 
         if (ExitCode is not null)
@@ -60,6 +66,7 @@ internal sealed class CodexDiagnosticBuffer
     private int? _processId;
     private int? _exitCode;
     private long? _processGeneration;
+    private IReadOnlyList<string> _attachedThreadIds = [];
     private string _stage = "idle";
     private string? _errorMessage;
 
@@ -93,6 +100,17 @@ internal sealed class CodexDiagnosticBuffer
         lock (_gate)
         {
             _processGeneration = generation;
+        }
+    }
+
+    public void SetAttachedThreadIds(IEnumerable<string> threadIds)
+    {
+        lock (_gate)
+        {
+            _attachedThreadIds = threadIds
+                .Where(threadId => !string.IsNullOrWhiteSpace(threadId))
+                .OrderBy(threadId => threadId, StringComparer.Ordinal)
+                .ToArray();
         }
     }
 
@@ -142,7 +160,8 @@ internal sealed class CodexDiagnosticBuffer
                 _stage,
                 _errorMessage,
                 _messages.ToArray(),
-                _processGeneration);
+                _processGeneration,
+                _attachedThreadIds.ToArray());
         }
     }
 

@@ -34,6 +34,10 @@ The browser endpoint is runtime state, while the Workstream fields are the durab
 
 Codex thread attachment is tracked per app-server process generation. The first turn in a generation starts or resumes the saved thread; later turns reuse the attached thread without another `thread/resume`. A new process generation resumes the saved thread once. If the App Server reports that another process owns the active writer, BlueRelay keeps the current task and thread, moves the Workstream to NeedsAttention, and offers retrying the original session or starting a new Codex session. Starting a new session clears only the Codex binding; project, task, ChatGPT pairing, browser endpoint, and user note remain intact.
 
+`Workstream.CodexThreadId` is the only source of truth for routing. `CodexSessionId` is retained only as a legacy compatibility field and is migrated into the thread id only while loading an older pre-current-schema state. A reset clears both fields, removes the old id from the current process attachment set, persists the unbound Workstream before the next send, and keeps the current task and its `task.md` payload. A late result from an earlier attempt cannot restore a binding after a reset because sends are checked against the Workstream binding revision before applying a returned thread id.
+
+BlueRelay owns the App Server child it starts. Startup is serialized through one connection generation, and a failed or disconnected generation is fully detached before another one can start. Normal application and tray exit stop and dispose that owned child; the bridge never scans for or terminates unrelated Codex Desktop, Codex CLI, or other user processes. Active-writer diagnostics report only BlueRelay's own process id, generation, and currently attached thread set.
+
 Routing diagnostics contain only Workstream and shortened endpoint/thread identities plus the routing decision. Prompt and result bodies are never included.
 
 ## Approval boundary
