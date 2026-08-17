@@ -6,6 +6,7 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
 {
     private readonly string _executablePath;
     private Process? _process;
+    private int _exitRaised;
 
     public CodexAppServerProcess(string executablePath)
     {
@@ -18,7 +19,11 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
 
     public bool HasExited => _process is null || _process.HasExited;
 
-    public event EventHandler? Exited;
+    public int? ProcessId { get; private set; }
+
+    public int? ExitCode { get; private set; }
+
+    public event EventHandler<CodexProcessExit>? Exited;
 
     public event EventHandler<string>? DiagnosticOutput;
 
@@ -47,6 +52,7 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
         process.StartInfo.ArgumentList.Add("--listen");
         process.StartInfo.ArgumentList.Add("stdio://");
         process.Exited += Process_Exited;
+        _exitRaised = 0;
 
         if (!process.Start())
         {
@@ -55,6 +61,8 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
         }
 
         _process = process;
+        ProcessId = process.Id;
+        ExitCode = null;
         _ = PumpDiagnosticsAsync(process.StandardError);
         await Task.Yield();
         cancellationToken.ThrowIfCancellationRequested();
@@ -92,13 +100,25 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
             {
                 if (!process.HasExited)
                 {
-                    process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                    try
+                    {
+                        process.Kill(entireProcessTree: true);
+                        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // The process exited between the check and Kill.
+                    }
                 }
             }
         }
         finally
         {
+            if (process.HasExited)
+            {
+                ExitCode = process.ExitCode;
+            }
+
             process.Dispose();
         }
     }
@@ -113,7 +133,14 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
             {
                 if (!string.IsNullOrWhiteSpace(line))
                 {
-                    DiagnosticOutput?.Invoke(this, line.Length > 512 ? line[..512] : line);
+                    try
+                    {
+                        DiagnosticOutput?.Invoke(this, line.Length > 512 ? line[..512] : line);
+                    }
+                    catch
+                    {
+                        // Diagnostics consumers must never terminate stderr pumping.
+                    }
                 }
             }
         }
@@ -127,6 +154,31 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
 
     private void Process_Exited(object? sender, EventArgs e)
     {
-        Exited?.Invoke(this, e);
+        if (Interlocked.Exchange(ref _exitRaised, 1) != 0)
+        {
+            return;
+        }
+
+        int? exitCode = null;
+        try
+        {
+            if (_process is { HasExited: true } process)
+            {
+                exitCode = process.ExitCode;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        ExitCode = exitCode;
+        try
+        {
+            Exited?.Invoke(this, new CodexProcessExit(exitCode));
+        }
+        catch
+        {
+            // Process lifecycle consumers must not fault the Process event thread.
+        }
     }
 }

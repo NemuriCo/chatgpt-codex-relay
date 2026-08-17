@@ -9,6 +9,10 @@ public interface ICodexBridge
 
     string? Version { get; }
 
+    string? ErrorMessage { get; }
+
+    CodexDiagnosticSnapshot Diagnostics { get; }
+
     event EventHandler<CodexProgressUpdate>? ProgressChanged;
 
     event EventHandler<CodexApprovalRequest>? ApprovalRequested;
@@ -16,6 +20,8 @@ public interface ICodexBridge
     event EventHandler<CodexThreadUpdate>? ThreadChanged;
 
     event EventHandler? StatusChanged;
+
+    event EventHandler? DiagnosticsChanged;
 
     Task<CodexTurnResult> SubmitTaskAsync(CodexTaskRequest request, CancellationToken cancellationToken = default);
 

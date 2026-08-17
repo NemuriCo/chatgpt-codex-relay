@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using BlueRelay.Models;
@@ -45,6 +44,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
 {
     private readonly ApplicationState _state;
     private readonly CodexExecutableLocator _locator;
+    private readonly CodexDiagnosticBuffer _diagnostics = new();
     private readonly SemaphoreSlim _startGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _workstreamGates = new();
     private readonly ConcurrentDictionary<string, ActiveTurn> _activeTurns = new(StringComparer.Ordinal);
@@ -52,6 +52,8 @@ public sealed class CodexAppServerBridge : ICodexBridge
     private CodexProtocolClient? _protocol;
     private CodexBridgeStatus _status = CodexBridgeStatus.Disconnected;
     private string? _version;
+    private int _disconnectHandled;
+    private int _stopping;
 
     public CodexAppServerBridge(ApplicationState state, CodexExecutableLocator? locator = null)
     {
@@ -63,6 +65,10 @@ public sealed class CodexAppServerBridge : ICodexBridge
 
     public string? Version => _version;
 
+    public string? ErrorMessage => _diagnostics.Snapshot().ErrorMessage;
+
+    public CodexDiagnosticSnapshot Diagnostics => _diagnostics.Snapshot();
+
     public event EventHandler<CodexProgressUpdate>? ProgressChanged;
 
     public event EventHandler<CodexApprovalRequest>? ApprovalRequested;
@@ -71,13 +77,15 @@ public sealed class CodexAppServerBridge : ICodexBridge
 
     public event EventHandler? StatusChanged;
 
+    public event EventHandler? DiagnosticsChanged;
+
     public async Task<CodexTurnResult> SubmitTaskAsync(
         CodexTaskRequest request,
         CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(request.Project.LocalPath))
         {
-            return Failure("The project directory no longer exists.");
+            return Failure($"Project directory does not exist: {request.Project.LocalPath}");
         }
 
         var gate = _workstreamGates.GetOrAdd(request.Workstream.Id, static _ => new SemaphoreSlim(1, 1));
@@ -85,6 +93,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
         try
         {
             var protocol = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+            SetError(null);
             var threadId = await EnsureThreadAsync(protocol, request, cancellationToken).ConfigureAwait(false);
             var active = new ActiveTurn(request.Workstream.Id, threadId);
             if (!_activeTurns.TryAdd(threadId, active))
@@ -95,6 +104,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
             SetStatus(CodexBridgeStatus.Running);
             try
             {
+                SetStage("turn_start");
                 var response = await protocol.RequestAsync(
                     "turn/start",
                     new
@@ -105,6 +115,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
                     cancellationToken).ConfigureAwait(false);
                 active.TurnId = ReadString(response, "turn", "id") ?? ReadString(response, "turnId");
                 PublishProgress(active, "正在提交任务", "Codex 已接收任务。");
+                SetStage("running");
 
                 return await active.Completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -119,13 +130,18 @@ public sealed class CodexAppServerBridge : ICodexBridge
             }
             catch (Exception exception)
             {
-                active.Completion.TrySetResult(Failure(exception.Message, threadId, active.TurnId));
+                var error = FormatFailure(exception);
+                SetError(error);
+                active.Completion.TrySetResult(Failure(error, threadId, active.TurnId));
                 return await active.Completion.Task.ConfigureAwait(false);
             }
             finally
             {
                 _activeTurns.TryRemove(threadId, out _);
-                SetStatus(_activeTurns.IsEmpty ? CodexBridgeStatus.Connected : CodexBridgeStatus.Running);
+                if (_status != CodexBridgeStatus.Error)
+                {
+                    SetStatus(_activeTurns.IsEmpty ? CodexBridgeStatus.Connected : CodexBridgeStatus.Running);
+                }
             }
         }
         finally
@@ -159,6 +175,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
         }
         catch (Exception exception) when (exception is CodexProtocolException or IOException or InvalidOperationException)
         {
+            SetError(FormatFailure(exception));
             return false;
         }
     }
@@ -182,22 +199,11 @@ public sealed class CodexAppServerBridge : ICodexBridge
                     : new { fileSystem = (object?)null, network = (object?)null },
                 scope = "turn"
             },
-            _ => new { answers = new Dictionary<string, object>() }
+            "item/tool/requestUserInput" => new { answers = new Dictionary<string, object>() },
+            _ => new { }
         };
         SetStatus(_activeTurns.IsEmpty ? CodexBridgeStatus.Connected : CodexBridgeStatus.Running);
         return protocol.RespondAsync(requestId, response, cancellationToken);
-    }
-
-    private static object ReadRequestedPermissions(JsonElement? parameters)
-    {
-        if (parameters is { } value &&
-            value.ValueKind == JsonValueKind.Object &&
-            value.TryGetProperty("permissions", out var permissions))
-        {
-            return permissions.Clone();
-        }
-
-        return new { fileSystem = (object?)null, network = (object?)null };
     }
 
     public Task ResetThreadAsync(Workstream workstream, CancellationToken cancellationToken = default)
@@ -212,15 +218,14 @@ public sealed class CodexAppServerBridge : ICodexBridge
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        var protocol = _protocol;
-        _protocol = null;
+        Interlocked.Exchange(ref _stopping, 1);
+        var protocol = Interlocked.Exchange(ref _protocol, null);
         if (protocol is not null)
         {
             await protocol.DisposeAsync().ConfigureAwait(false);
         }
 
-        var process = _process;
-        _process = null;
+        var process = Interlocked.Exchange(ref _process, null);
         if (process is not null)
         {
             await process.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -233,12 +238,14 @@ public sealed class CodexAppServerBridge : ICodexBridge
         }
 
         _activeTurns.Clear();
+        SetStage("stopped");
         SetStatus(CodexBridgeStatus.Disconnected);
+        Interlocked.Exchange(ref _stopping, 0);
     }
 
     private async Task<CodexProtocolClient> EnsureStartedAsync(CancellationToken cancellationToken)
     {
-        if (_protocol is { } existing)
+        if (_protocol is { } existing && _status != CodexBridgeStatus.Error)
         {
             return existing;
         }
@@ -246,52 +253,78 @@ public sealed class CodexAppServerBridge : ICodexBridge
         await _startGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_protocol is { } started)
+            if (_protocol is { } started && _status != CodexBridgeStatus.Error)
             {
                 return started;
             }
 
             SetStatus(CodexBridgeStatus.Connecting);
-            var executable = _locator.Locate(_state.CodexExecutablePath);
+            SetStage("process_start");
+            SetError(null);
+            Interlocked.Exchange(ref _disconnectHandled, 0);
+            var executable = await _locator.LocateAsync(_state.CodexExecutablePath, cancellationToken).ConfigureAwait(false);
             if (!executable.Found)
             {
+                var error = $"Codex 未安装或未找到：{executable.Error}";
+                SetError(error);
                 SetStatus(CodexBridgeStatus.Error);
-                throw new FileNotFoundException(executable.Error);
+                throw new FileNotFoundException(error);
             }
 
-            _version = await ReadVersionAsync(executable.Path!, cancellationToken).ConfigureAwait(false);
+            _version = executable.Version?.Trim();
+            _diagnostics.SetExecutable(executable.Path, _version);
+            RaiseDiagnosticsChanged();
+
             var process = new CodexAppServerProcess(executable.Path!);
+            process.DiagnosticOutput += Process_DiagnosticOutput;
+            process.Exited += Process_Exited;
             await process.StartAsync(cancellationToken).ConfigureAwait(false);
+            _diagnostics.SetProcess(process.ProcessId);
+            RaiseDiagnosticsChanged();
+
             var protocol = new CodexProtocolClient(process.Output!, process.Input!);
             protocol.NotificationReceived += Protocol_NotificationReceived;
             protocol.ServerRequestReceived += Protocol_ServerRequestReceived;
             protocol.Disconnected += Protocol_Disconnected;
-            process.Exited += Process_Exited;
+            protocol.Diagnostic += Protocol_Diagnostic;
             _process = process;
             _protocol = protocol;
             protocol.Start();
 
             try
             {
+                SetStage("initialize");
                 var initialize = await protocol.RequestAsync(
                     "initialize",
                     new
                     {
-                        clientInfo = new { name = "bluerelay", title = "BlueRelay", version = "0.1.0" }
+                        clientInfo = new { name = "bluerelay", title = "BlueRelay", version = "0.1.0" },
+                        capabilities = new { experimentalApi = false, requestAttestation = false }
                     },
                     cancellationToken).ConfigureAwait(false);
-                _version = ReadString(initialize, "serverInfo", "version") ?? ReadString(initialize, "version");
+                var serverUserAgent = ReadString(initialize, "userAgent");
+                if (!string.IsNullOrWhiteSpace(serverUserAgent))
+                {
+                    _diagnostics.Add($"initialize userAgent: {serverUserAgent}");
+                    RaiseDiagnosticsChanged();
+                }
+
+                SetStage("initialized");
                 await protocol.NotifyAsync("initialized", null, cancellationToken).ConfigureAwait(false);
                 SetStatus(CodexBridgeStatus.Connected);
                 return protocol;
             }
-            catch
+            catch (Exception exception)
             {
-                _protocol = null;
-                await protocol.DisposeAsync().ConfigureAwait(false);
-                await process.StopAsync(CancellationToken.None).ConfigureAwait(false);
-                await process.DisposeAsync().ConfigureAwait(false);
-                _process = null;
+                var error = FormatFailure(exception);
+                SetError(error);
+                var ownedProtocol = ReferenceEquals(Interlocked.CompareExchange(ref _protocol, null, protocol), protocol)
+                    ? protocol
+                    : null;
+                var ownedProcess = ReferenceEquals(Interlocked.CompareExchange(ref _process, null, process), process)
+                    ? process
+                    : null;
+                await DetachConnectionAsync(ownedProtocol, ownedProcess).ConfigureAwait(false);
                 SetStatus(CodexBridgeStatus.Error);
                 throw;
             }
@@ -309,6 +342,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
     {
         if (!string.IsNullOrWhiteSpace(request.Workstream.CodexThreadId))
         {
+            SetStage("thread_resume");
             await protocol.RequestAsync(
                 "thread/resume",
                 new { threadId = request.Workstream.CodexThreadId, cwd = request.Project.LocalPath },
@@ -316,6 +350,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
             return request.Workstream.CodexThreadId;
         }
 
+        SetStage("thread_start");
         var response = await protocol.RequestAsync(
             "thread/start",
             new
@@ -335,7 +370,15 @@ public sealed class CodexAppServerBridge : ICodexBridge
 
         request.Workstream.CodexThreadId = threadId;
         request.Workstream.CodexSessionId = threadId;
-        ThreadChanged?.Invoke(this, new CodexThreadUpdate(request.Workstream.Id, threadId));
+        try
+        {
+            ThreadChanged?.Invoke(this, new CodexThreadUpdate(request.Workstream.Id, threadId));
+        }
+        catch (Exception exception)
+        {
+            Protocol_Diagnostic(this, $"thread_changed_handler_error: {exception.GetType().Name}: {exception.Message}");
+        }
+
         return threadId;
     }
 
@@ -354,7 +397,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
                 }
 
                 break;
-            case "agentMessage/delta":
+            case "item/agentMessage/delta":
                 if (active is not null)
                 {
                     active.Result.Append(ReadString(parameters, "delta") ?? string.Empty);
@@ -387,33 +430,69 @@ public sealed class CodexAppServerBridge : ICodexBridge
                 }
 
                 break;
-            case "commandExecution/outputDelta":
+            case "item/commandExecution/outputDelta":
                 if (active is not null)
                 {
                     PublishProgress(active, "执行命令", "Codex 正在执行项目命令。");
                 }
 
                 break;
-            case "fileChange/outputDelta":
-            case "fileChange/patchUpdated":
+            case "item/fileChange/outputDelta":
+            case "item/fileChange/patchUpdated":
                 if (active is not null)
                 {
                     PublishProgress(active, "修改文件", "Codex 正在修改项目文件。");
                 }
 
                 break;
+            case "error":
+                var serverError = FormatServerError(parameters);
+                if (!string.IsNullOrWhiteSpace(serverError))
+                {
+                    _diagnostics.Add($"server error: {serverError}");
+                    RaiseDiagnosticsChanged();
+                    if (active is not null)
+                    {
+                        active.LastServerError = serverError;
+                        PublishProgress(active, "连接重试", serverError);
+                        if (ReadBoolean(parameters, "willRetry") == false)
+                        {
+                            SetError(serverError);
+                            active.Completion.TrySetResult(
+                                Failure(serverError, active.ThreadId, active.TurnId));
+                        }
+                    }
+                }
+
+                break;
+            case "warning":
+                var warning = ReadString(parameters, "message");
+                if (!string.IsNullOrWhiteSpace(warning))
+                {
+                    _diagnostics.Add($"server warning: {warning}");
+                    RaiseDiagnosticsChanged();
+                }
+
+                break;
             case "turn/completed":
                 if (active is not null)
                 {
-                    var status = ReadString(parameters, "turn", "status") ?? "completed";
+                    var status = ReadString(parameters, "turn", "status") ?? "failed";
                     var result = active.Result.ToString().Trim();
+                    var error = FormatTurnError(parameters) ?? active.LastServerError;
                     var cancelled = string.Equals(status, "interrupted", StringComparison.OrdinalIgnoreCase);
                     var failed = string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase) ||
                                  string.Equals(status, "error", StringComparison.OrdinalIgnoreCase);
+                    if (!failed && !cancelled && string.IsNullOrWhiteSpace(result))
+                    {
+                        failed = true;
+                        error ??= "Codex completed without a final agent message.";
+                    }
+
                     active.Completion.TrySetResult(
                         failed
-                            ? Failure(ReadString(parameters, "turn", "error", "message") ?? "Codex turn failed.", active.ThreadId, active.TurnId)
-                            : new CodexTurnResult(!cancelled, active.ThreadId, active.TurnId, result, cancelled ? "Codex turn was interrupted." : null, cancelled));
+                            ? Failure(error ?? "Codex turn failed.", active.ThreadId, active.TurnId)
+                            : new CodexTurnResult(true, active.ThreadId, active.TurnId, result, null, false));
                 }
 
                 break;
@@ -423,21 +502,99 @@ public sealed class CodexAppServerBridge : ICodexBridge
     private void Protocol_ServerRequestReceived(object? sender, CodexServerRequest request)
     {
         SetStatus(CodexBridgeStatus.WaitingForApproval);
-        ApprovalRequested?.Invoke(this, new CodexApprovalRequest(request.RequestId, request.Method, request.Params));
+        var handler = ApprovalRequested;
+        if (handler is null)
+        {
+            _ = RespondToApprovalSafelyAsync(request, approved: false);
+            return;
+        }
+
+        try
+        {
+            handler.Invoke(this, new CodexApprovalRequest(request.RequestId, request.Method, request.Params));
+        }
+        catch (Exception exception)
+        {
+            Protocol_Diagnostic(this, $"approval_handler_error: {exception.GetType().Name}: {exception.Message}");
+            _ = RespondToApprovalSafelyAsync(request, approved: false);
+        }
+    }
+
+    private async Task RespondToApprovalSafelyAsync(CodexServerRequest request, bool approved)
+    {
+        try
+        {
+            await RespondToApprovalAsync(request.RequestId, request.Method, approved, request.Params).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            SetError(FormatFailure(exception));
+        }
     }
 
     private void Protocol_Disconnected(object? sender, Exception exception)
     {
-        SetStatus(CodexBridgeStatus.Error);
+        HandleDisconnect(exception, sender as CodexProtocolClient);
+    }
+
+    private void Process_Exited(object? sender, CodexProcessExit exit)
+    {
+        _diagnostics.SetExitCode(exit.ExitCode);
+        RaiseDiagnosticsChanged();
+        HandleDisconnect(
+            new EndOfStreamException($"Codex App Server exited with code {exit.ExitCode?.ToString() ?? "unknown"}."),
+            sender as CodexAppServerProcess);
+    }
+
+    private void HandleDisconnect(Exception exception, object? source)
+    {
+        if (Interlocked.Exchange(ref _disconnectHandled, 1) != 0 || Volatile.Read(ref _stopping) != 0)
+        {
+            return;
+        }
+
+        SetStage("disconnect");
+        var error = BuildDisconnectError(exception);
+        SetError(error);
         foreach (var active in _activeTurns.Values)
         {
-            active.Completion.TrySetResult(Failure("Codex App Server disconnected.", active.ThreadId, active.TurnId));
+            active.Completion.TrySetResult(Failure(error, active.ThreadId, active.TurnId));
+        }
+
+        var protocol = Interlocked.Exchange(ref _protocol, null);
+        var process = Interlocked.Exchange(ref _process, null);
+        SetStatus(CodexBridgeStatus.Error);
+        _ = DetachConnectionAsync(
+            ReferenceEquals(source, protocol) ? null : protocol,
+            ReferenceEquals(source, process) ? null : process);
+    }
+
+    private async Task DetachConnectionAsync(
+        CodexProtocolClient? protocol,
+        CodexAppServerProcess? process)
+    {
+        if (protocol is not null)
+        {
+            await protocol.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (process is not null)
+        {
+            await process.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await process.DisposeAsync().ConfigureAwait(false);
         }
     }
 
-    private void Process_Exited(object? sender, EventArgs e)
+    private void Process_DiagnosticOutput(object? sender, string message)
     {
-        Protocol_Disconnected(sender, new EndOfStreamException("Codex App Server exited."));
+        _diagnostics.Add($"stderr: {message}");
+        RaiseDiagnosticsChanged();
+    }
+
+    private void Protocol_Diagnostic(object? sender, string message)
+    {
+        _diagnostics.Add($"protocol: {message}");
+        RaiseDiagnosticsChanged();
     }
 
     private void PublishItemProgress(ActiveTurn active, string? type)
@@ -460,9 +617,16 @@ public sealed class CodexAppServerBridge : ICodexBridge
             return;
         }
 
-        ProgressChanged?.Invoke(
-            this,
-            new CodexProgressUpdate(active.WorkstreamId, active.ThreadId, active.TurnId, stage, detail));
+        try
+        {
+            ProgressChanged?.Invoke(
+                this,
+                new CodexProgressUpdate(active.WorkstreamId, active.ThreadId, active.TurnId, stage, detail));
+        }
+        catch (Exception exception)
+        {
+            Protocol_Diagnostic(this, $"progress_handler_error: {exception.GetType().Name}: {exception.Message}");
+        }
     }
 
     private void SetStatus(CodexBridgeStatus status)
@@ -473,7 +637,91 @@ public sealed class CodexAppServerBridge : ICodexBridge
         }
 
         _status = status;
-        StatusChanged?.Invoke(this, EventArgs.Empty);
+        try
+        {
+            StatusChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception exception)
+        {
+            Protocol_Diagnostic(this, $"status_handler_error: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    private void SetStage(string stage)
+    {
+        _diagnostics.SetStage(stage);
+        RaiseDiagnosticsChanged();
+    }
+
+    private void SetError(string? message)
+    {
+        _diagnostics.SetError(message);
+        RaiseDiagnosticsChanged();
+    }
+
+    private void RaiseDiagnosticsChanged()
+    {
+        try
+        {
+            DiagnosticsChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch
+        {
+            // Diagnostics consumers must not affect the bridge.
+        }
+    }
+
+    private string BuildDisconnectError(Exception exception)
+    {
+        var snapshot = _diagnostics.Snapshot();
+        var stderr = snapshot.RecentMessages
+            .LastOrDefault(message => message.StartsWith("stderr:", StringComparison.OrdinalIgnoreCase));
+        var reason = string.IsNullOrWhiteSpace(stderr) ? exception.Message : stderr;
+        var prefix = snapshot.ExitCode is not null
+            ? $"Codex App Server 进程已退出（exit code {snapshot.ExitCode}）"
+            : "Codex App Server 连接已断开";
+        return $"{prefix}：{reason}";
+    }
+
+    private static string FormatFailure(Exception exception)
+    {
+        if (exception is CodexProtocolException protocolException)
+        {
+            return $"Codex App Server 协议错误：{protocolException.Message}";
+        }
+
+        if (exception.Message.Contains("login", StringComparison.OrdinalIgnoreCase) ||
+            exception.Message.Contains("auth", StringComparison.OrdinalIgnoreCase) ||
+            exception.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Codex 尚未登录：{exception.Message}";
+        }
+
+        return exception.Message;
+    }
+
+    private static string? FormatTurnError(JsonElement parameters)
+    {
+        var message = ReadString(parameters, "turn", "error", "message");
+        var details = ReadString(parameters, "turn", "error", "additionalDetails");
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return details;
+        }
+
+        return string.IsNullOrWhiteSpace(details) ? message : $"{message} ({details})";
+    }
+
+    private static string? FormatServerError(JsonElement parameters)
+    {
+        var message = ReadString(parameters, "error", "message");
+        var details = ReadString(parameters, "error", "additionalDetails");
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return details;
+        }
+
+        return string.IsNullOrWhiteSpace(details) ? message : $"{message} ({details})";
     }
 
     private static string? ReadString(JsonElement element, params string[] path)
@@ -490,40 +738,30 @@ public sealed class CodexAppServerBridge : ICodexBridge
         return current.ValueKind == JsonValueKind.String ? current.GetString() : null;
     }
 
+    private static bool? ReadBoolean(JsonElement element, string property)
+    {
+        return element.ValueKind == JsonValueKind.Object &&
+               element.TryGetProperty(property, out var value) &&
+               value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : null;
+    }
+
+    private static object ReadRequestedPermissions(JsonElement? parameters)
+    {
+        if (parameters is { } value &&
+            value.ValueKind == JsonValueKind.Object &&
+            value.TryGetProperty("permissions", out var permissions))
+        {
+            return permissions.Clone();
+        }
+
+        return new { fileSystem = (object?)null, network = (object?)null };
+    }
+
     private static CodexTurnResult Failure(string error, string? threadId = null, string? turnId = null)
     {
         return new CodexTurnResult(false, threadId, turnId, null, error);
-    }
-
-    private static async Task<string?> ReadVersionAsync(string executablePath, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = executablePath,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-            process.StartInfo.ArgumentList.Add("--version");
-            if (!process.Start())
-            {
-                return null;
-            }
-
-            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            return output.Trim();
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or OperationCanceledException)
-        {
-            return null;
-        }
     }
 
     private sealed class ActiveTurn
@@ -539,6 +777,8 @@ public sealed class CodexAppServerBridge : ICodexBridge
         public string ThreadId { get; }
 
         public string? TurnId { get; set; }
+
+        public string? LastServerError { get; set; }
 
         public StringBuilder Result { get; } = new();
 

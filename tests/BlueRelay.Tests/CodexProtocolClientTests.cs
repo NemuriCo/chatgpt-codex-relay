@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Channels;
 using BlueRelay.Services.Codex;
 
@@ -9,14 +9,14 @@ namespace BlueRelay.Tests;
 public sealed class CodexProtocolClientTests
 {
     [TestMethod]
-    public async Task RequestUsesJsonLinesAndMatchesTheResponse()
+    public async Task RequestUsesCanonicalJsonLinesWithoutJsonRpcEnvelope()
     {
         using var input = new ChannelTextReader();
         using var output = new CallbackTextWriter(line =>
         {
             using var request = JsonDocument.Parse(line);
             var id = request.RootElement.GetProperty("id").GetRawText();
-            input.Enqueue("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"ok\":true}}");
+            input.Enqueue("{\"id\":" + id + ",\"result\":{\"ok\":true}}");
         });
         await using var client = new CodexProtocolClient(input, output);
         client.Start();
@@ -27,12 +27,28 @@ public sealed class CodexProtocolClientTests
         });
 
         Assert.IsTrue(result.GetProperty("ok").GetBoolean());
-        Assert.AreEqual("initialize", output.LastRequest!.Value.GetProperty("method").GetString());
-        Assert.AreEqual("bluerelay", output.LastRequest!.Value.GetProperty("params").GetProperty("clientInfo").GetProperty("name").GetString());
+        Assert.IsNotNull(output.LastRequest);
+        Assert.IsFalse(output.LastRequest!.Value.TryGetProperty("jsonrpc", out _));
+        Assert.AreEqual("initialize", output.LastRequest.Value.GetProperty("method").GetString());
+        Assert.AreEqual("bluerelay", output.LastRequest.Value.GetProperty("params").GetProperty("clientInfo").GetProperty("name").GetString());
     }
 
     [TestMethod]
-    public async Task ServerRequestsAreRaisedAndCanBeAnswered()
+    public async Task NotificationUsesCanonicalJsonLinesWithoutJsonRpcEnvelope()
+    {
+        using var input = new ChannelTextReader();
+        using var output = new CallbackTextWriter(_ => { });
+        await using var client = new CodexProtocolClient(input, output);
+
+        await client.NotifyAsync("initialized", null);
+
+        using var message = JsonDocument.Parse(output.Lines.Single());
+        Assert.IsFalse(message.RootElement.TryGetProperty("jsonrpc", out _));
+        Assert.AreEqual("initialized", message.RootElement.GetProperty("method").GetString());
+    }
+
+    [TestMethod]
+    public async Task ServerRequestsAreRaisedAndCanonicalResponsesCanBeAnswered()
     {
         using var input = new ChannelTextReader();
         using var output = new CallbackTextWriter(_ => { });
@@ -41,14 +57,125 @@ public sealed class CodexProtocolClientTests
         client.ServerRequestReceived += (_, value) => request.TrySetResult(value);
         client.Start();
 
-        input.Enqueue("""{"jsonrpc":"2.0","id":42,"method":"item/fileChange/requestApproval","params":{"itemId":"item-1"}}""");
+        input.Enqueue("{\"id\":42,\"method\":\"item/fileChange/requestApproval\",\"params\":{\"itemId\":\"item-1\"}}");
         var received = await request.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.AreEqual("42", received.RequestId);
         Assert.AreEqual("item/fileChange/requestApproval", received.Method);
 
         await client.RespondAsync(received.RequestId, new { decision = "accept" });
-        Assert.IsTrue(output.Lines.Any(line => line.Contains("\"id\":42", StringComparison.Ordinal)));
-        Assert.IsTrue(output.Lines.Any(line => line.Contains("\"decision\":\"accept\"", StringComparison.Ordinal)));
+        using var response = JsonDocument.Parse(output.Lines.Single());
+        Assert.IsFalse(response.RootElement.TryGetProperty("jsonrpc", out _));
+        Assert.AreEqual(42, response.RootElement.GetProperty("id").GetInt32());
+        Assert.AreEqual("accept", response.RootElement.GetProperty("result").GetProperty("decision").GetString());
+    }
+
+    [TestMethod]
+    public async Task MalformedJsonDoesNotKillTheReadLoop()
+    {
+        using var input = new ChannelTextReader();
+        using var output = new CallbackTextWriter(line =>
+        {
+            using var request = JsonDocument.Parse(line);
+            input.Enqueue($"{{\"id\":{request.RootElement.GetProperty("id").GetRawText()},\"result\":{{\"ok\":true}}}}");
+        });
+        await using var client = new CodexProtocolClient(input, output);
+        var diagnostics = new List<string>();
+        client.Diagnostic += (_, message) => diagnostics.Add(message);
+        client.Start();
+        input.Enqueue("{not-json");
+
+        var result = await client.RequestAsync("thread/list", null);
+
+        Assert.IsTrue(result.GetProperty("ok").GetBoolean());
+        Assert.IsTrue(diagnostics.Any(message => message.StartsWith("malformed_json", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task NotificationHandlerExceptionDoesNotKillTheReadLoop()
+    {
+        using var input = new ChannelTextReader();
+        using var output = new CallbackTextWriter(line =>
+        {
+            using var request = JsonDocument.Parse(line);
+            input.Enqueue($"{{\"id\":{request.RootElement.GetProperty("id").GetRawText()},\"result\":{{\"ok\":true}}}}");
+        });
+        await using var client = new CodexProtocolClient(input, output);
+        var diagnostics = new List<string>();
+        client.Diagnostic += (_, message) => diagnostics.Add(message);
+        client.NotificationReceived += (_, _) => throw new InvalidOperationException("consumer failure");
+        client.Start();
+        input.Enqueue("{\"method\":\"item/started\",\"params\":{}}");
+
+        var result = await client.RequestAsync("thread/list", null);
+
+        Assert.IsTrue(result.GetProperty("ok").GetBoolean());
+        Assert.IsTrue(diagnostics.Any(message => message.StartsWith("notification_handler_error", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task ServerRequestHandlerExceptionDoesNotKillTheReadLoop()
+    {
+        using var input = new ChannelTextReader();
+        using var output = new CallbackTextWriter(line =>
+        {
+            using var request = JsonDocument.Parse(line);
+            input.Enqueue($"{{\"id\":{request.RootElement.GetProperty("id").GetRawText()},\"result\":{{\"ok\":true}}}}");
+        });
+        await using var client = new CodexProtocolClient(input, output);
+        var diagnostics = new List<string>();
+        client.Diagnostic += (_, message) => diagnostics.Add(message);
+        client.ServerRequestReceived += (_, _) => throw new InvalidOperationException("consumer failure");
+        client.Start();
+        input.Enqueue("{\"id\":43,\"method\":\"item/fileChange/requestApproval\",\"params\":{}}");
+
+        var result = await client.RequestAsync("thread/list", null);
+
+        Assert.IsTrue(result.GetProperty("ok").GetBoolean());
+        Assert.IsTrue(diagnostics.Any(message => message.StartsWith("server_request_handler_error", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task RequestErrorIsNotReportedAsTransportDisconnect()
+    {
+        using var input = new ChannelTextReader();
+        using var output = new CallbackTextWriter(line =>
+        {
+            using var request = JsonDocument.Parse(line);
+            input.Enqueue($"{{\"id\":{request.RootElement.GetProperty("id").GetRawText()},\"error\":{{\"code\":-32602,\"message\":\"invalid field\"}}}}");
+        });
+        await using var client = new CodexProtocolClient(input, output);
+        var disconnects = 0;
+        client.Disconnected += (_, _) => disconnects++;
+        client.Start();
+
+        var exception = await Assert.ThrowsExceptionAsync<CodexProtocolException>(
+            () => client.RequestAsync("thread/start", new { invalid = true }));
+
+        Assert.AreEqual("invalid field", exception.Message);
+        Assert.AreEqual(0, disconnects);
+    }
+
+    [TestMethod]
+    public async Task EofRaisesOneDisconnectEvent()
+    {
+        using var input = new ChannelTextReader();
+        using var output = new CallbackTextWriter(_ => { });
+        await using var client = new CodexProtocolClient(input, output);
+        var disconnected = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var count = 0;
+        client.Disconnected += (_, _) =>
+        {
+            count++;
+            disconnected.TrySetResult(true);
+        };
+        client.Start();
+
+        input.Complete();
+        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        input.Complete();
+        await Task.Delay(50);
+
+        Assert.AreEqual(1, count);
     }
 
     private sealed class ChannelTextReader : TextReader
@@ -56,6 +183,8 @@ public sealed class CodexProtocolClientTests
         private readonly Channel<string> _lines = Channel.CreateUnbounded<string>();
 
         public void Enqueue(string line) => _lines.Writer.TryWrite(line);
+
+        public void Complete() => _lines.Writer.TryComplete();
 
         public override async Task<string?> ReadLineAsync()
         {

@@ -14,7 +14,7 @@ public sealed class CodexAppServerSmokeTests
             Assert.Inconclusive("Set BLUERELAY_RUN_CODEX_SMOKE=1 to run the non-modifying Codex App Server smoke test.");
         }
 
-        var executable = new CodexExecutableLocator().Locate(Environment.GetEnvironmentVariable("BLUERELAY_CODEX_PATH"));
+        var executable = await new CodexExecutableLocator().LocateAsync(Environment.GetEnvironmentVariable("BLUERELAY_CODEX_PATH"));
         if (!executable.Found)
         {
             Assert.Inconclusive(executable.Error);
@@ -39,7 +39,11 @@ public sealed class CodexAppServerSmokeTests
 
         await protocol.RequestAsync(
             "initialize",
-            new { clientInfo = new { name = "bluerelay-smoke-test", title = "BlueRelay smoke test", version = "0.1.0" } });
+            new
+            {
+                clientInfo = new { name = "bluerelay-smoke-test", title = "BlueRelay smoke test", version = "0.1.0" },
+                capabilities = new { experimentalApi = false, requestAttestation = false }
+            });
         await protocol.NotifyAsync("initialized", null);
 
         var thread = await protocol.RequestAsync(
@@ -49,7 +53,7 @@ public sealed class CodexAppServerSmokeTests
                 cwd = Environment.CurrentDirectory,
                 approvalPolicy = "on-request",
                 approvalsReviewer = "user",
-                sandbox = "workspace-write",
+                sandbox = "read-only",
                 threadSource = "bluerelay-smoke-test"
             });
         var threadId = thread.GetProperty("thread").GetProperty("id").GetString();

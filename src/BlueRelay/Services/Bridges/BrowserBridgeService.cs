@@ -475,7 +475,8 @@ public sealed class BrowserBridgeService
                 return Failure<RelayTask>("task_not_found", "The task or Workstream no longer exists.");
             }
 
-            if (!IsCurrentTask(workstream, task) || workstream.CurrentState != WorkflowState.ReadyForCodex)
+            if (!IsCurrentTask(workstream, task) ||
+                workstream.CurrentState is not (WorkflowState.ReadyForCodex or WorkflowState.NeedsAttention or WorkflowState.Error))
             {
                 return Failure<RelayTask>("task_not_ready", "Only the current task in ReadyForCodex can be sent to Codex.");
             }

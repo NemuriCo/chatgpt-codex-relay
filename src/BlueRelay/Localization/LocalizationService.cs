@@ -90,6 +90,7 @@ public sealed class UiTextSet
     public required string BrowserDisconnected { get; init; }
     public required string BrowserNotBound { get; init; }
     public required string SendToCodex { get; init; }
+    public required string RetryCodex { get; init; }
     public required string CodexRunning { get; init; }
     public required string CodexCancel { get; init; }
     public required string CodexCancelled { get; init; }
@@ -241,6 +242,7 @@ public static class LocalizationService
         BrowserDisconnected = "ChatGPT • disconnected",
         BrowserNotBound = "ChatGPT • not bound",
         SendToCodex = "Confirm send",
+        RetryCodex = "Retry Codex task",
         CodexRunning = "Codex running",
         CodexCancel = "Cancel Codex task",
         CodexCancelled = "Codex task cancelled.",
@@ -391,6 +393,7 @@ public static class LocalizationService
         BrowserDisconnected = "ChatGPT · 已断开",
         BrowserNotBound = "ChatGPT · 未绑定",
         SendToCodex = "确认发送",
+        RetryCodex = "重试发送给 Codex",
         CodexRunning = "Codex 运行中",
         CodexCancel = "取消 Codex 任务",
         CodexCancelled = "Codex 任务已取消。",

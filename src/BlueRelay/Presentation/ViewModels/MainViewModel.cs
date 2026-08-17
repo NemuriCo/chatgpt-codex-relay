@@ -157,6 +157,7 @@ public sealed class MainViewModel : ObservableObject
             _codexBridge.ProgressChanged += CodexBridge_ProgressChanged;
             _codexBridge.ApprovalRequested += CodexBridge_ApprovalRequested;
             _codexBridge.StatusChanged += CodexBridge_StatusChanged;
+            _codexBridge.DiagnosticsChanged += CodexBridge_DiagnosticsChanged;
         }
         if (_browserBridge.PairingCode.Code is null)
         {
@@ -231,11 +232,19 @@ public sealed class MainViewModel : ObservableObject
         CodexBridgeStatus.Running => Ui.CodexRunning,
         CodexBridgeStatus.WaitingForApproval => Ui.CodexApprovalTitle,
         CodexBridgeStatus.Connecting => Ui.CodexRunning,
-        CodexBridgeStatus.Error => Ui.GetStateLabel(WorkflowState.Error),
+        CodexBridgeStatus.Error => string.IsNullOrWhiteSpace(CodexErrorText)
+            ? Ui.GetStateLabel(WorkflowState.Error)
+            : CodexErrorText,
         _ => Ui.NoSession
     };
 
     public string CodexVersion => _codexBridge?.Version ?? string.Empty;
+
+    public string CodexErrorText => _codexBridge?.ErrorMessage ?? string.Empty;
+
+    public bool HasCodexError => !string.IsNullOrWhiteSpace(CodexErrorText);
+
+    public string CodexDiagnosticsText => _codexBridge?.Diagnostics.ToDisplayText() ?? string.Empty;
 
     public ICommand HandoffResultCommand => _handoffResultCommand;
 
@@ -1061,7 +1070,21 @@ public sealed class MainViewModel : ObservableObject
             OnPropertyChanged(nameof(CodexStatus));
             OnPropertyChanged(nameof(CodexStatusText));
             OnPropertyChanged(nameof(CodexVersion));
+            OnPropertyChanged(nameof(CodexErrorText));
+            OnPropertyChanged(nameof(HasCodexError));
+            OnPropertyChanged(nameof(CodexDiagnosticsText));
             RaiseCommandStates();
+        });
+    }
+
+    private void CodexBridge_DiagnosticsChanged(object? sender, EventArgs e)
+    {
+        RefreshDataOnUiThread(_state.SelectedProjectId, SelectedWorkstream?.Id, () =>
+        {
+            OnPropertyChanged(nameof(CodexStatusText));
+            OnPropertyChanged(nameof(CodexErrorText));
+            OnPropertyChanged(nameof(HasCodexError));
+            OnPropertyChanged(nameof(CodexDiagnosticsText));
         });
     }
 

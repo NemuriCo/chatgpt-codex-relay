@@ -18,6 +18,7 @@ public sealed class CodexProtocolClient : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private long _nextRequestId;
     private Task? _readLoop;
+    private int _disconnectRaised;
 
     public CodexProtocolClient(TextReader reader, TextWriter writer)
     {
@@ -31,6 +32,8 @@ public sealed class CodexProtocolClient : IAsyncDisposable
 
     public event EventHandler<Exception>? Disconnected;
 
+    public event EventHandler<string>? Diagnostic;
+
     public void Start()
     {
         _readLoop ??= Task.Run(ReadLoopAsync);
@@ -43,7 +46,10 @@ public sealed class CodexProtocolClient : IAsyncDisposable
     {
         var id = Interlocked.Increment(ref _nextRequestId).ToString(System.Globalization.CultureInfo.InvariantCulture);
         var pending = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[id] = pending;
+        if (!_pending.TryAdd(id, pending))
+        {
+            throw new InvalidOperationException($"The Codex request id {id} is already in use.");
+        }
 
         try
         {
@@ -66,8 +72,7 @@ public sealed class CodexProtocolClient : IAsyncDisposable
     {
         var message = new JsonObject
         {
-            ["jsonrpc"] = "2.0",
-            ["id"] = JsonNode.Parse(requestId) ?? JsonValue.Create(requestId),
+            ["id"] = ParseRequestId(requestId),
             ["result"] = JsonSerializer.SerializeToNode(result)
         };
         return WriteMessageAsync(message, cancellationToken);
@@ -104,8 +109,9 @@ public sealed class CodexProtocolClient : IAsyncDisposable
     {
         var message = new JsonObject
         {
-            ["jsonrpc"] = "2.0",
-            ["id"] = JsonValue.Create(long.Parse(id, System.Globalization.CultureInfo.InvariantCulture)),
+            ["id"] = long.TryParse(id, out var numericId)
+                ? JsonValue.Create(numericId)
+                : JsonValue.Create(id),
             ["method"] = method
         };
         if (parameters is not null)
@@ -120,7 +126,6 @@ public sealed class CodexProtocolClient : IAsyncDisposable
     {
         var message = new JsonObject
         {
-            ["jsonrpc"] = "2.0",
             ["method"] = method
         };
         if (parameters is not null)
@@ -129,6 +134,18 @@ public sealed class CodexProtocolClient : IAsyncDisposable
         }
 
         return message;
+    }
+
+    private static JsonNode ParseRequestId(string requestId)
+    {
+        try
+        {
+            return JsonNode.Parse(requestId) ?? JsonValue.Create(requestId);
+        }
+        catch (JsonException)
+        {
+            return JsonValue.Create(requestId);
+        }
     }
 
     private async Task WriteMessageAsync(JsonObject message, CancellationToken cancellationToken)
@@ -153,7 +170,7 @@ public sealed class CodexProtocolClient : IAsyncDisposable
 
     private async Task ReadLoopAsync()
     {
-        Exception? failure = null;
+        Exception? transportFailure = null;
         try
         {
             while (!_stop.IsCancellationRequested && await _reader.ReadLineAsync().ConfigureAwait(false) is { } line)
@@ -168,62 +185,151 @@ public sealed class CodexProtocolClient : IAsyncDisposable
                     throw new InvalidDataException("The Codex App Server sent an oversized JSON message.");
                 }
 
-                using var document = JsonDocument.Parse(line);
-                var root = document.RootElement;
-                if (root.TryGetProperty("id", out var id))
+                try
                 {
-                    var idKey = id.GetRawText();
-                    if (_pending.TryRemove(idKey, out var pending))
-                    {
-                        if (root.TryGetProperty("error", out var error))
-                        {
-                            var message = error.TryGetProperty("message", out var errorMessage)
-                                ? errorMessage.GetString()
-                                : "The Codex App Server request failed.";
-                            pending.TrySetException(new CodexProtocolException(message ?? "The Codex App Server request failed.", error));
-                        }
-                        else if (root.TryGetProperty("result", out var result))
-                        {
-                            pending.TrySetResult(result.Clone());
-                        }
-                    }
-                    else if (root.TryGetProperty("method", out var serverMethod))
-                    {
-                        var parameters = root.TryGetProperty("params", out var requestParams)
-                            ? requestParams.Clone()
-                            : default;
-                        ServerRequestReceived?.Invoke(this, new CodexServerRequest(idKey, serverMethod.GetString() ?? string.Empty, parameters));
-                    }
-
-                    continue;
+                    ProcessMessage(line);
                 }
-
-                if (root.TryGetProperty("method", out var method))
+                catch (JsonException exception)
                 {
-                    var parameters = root.TryGetProperty("params", out var notificationParams)
-                        ? notificationParams.Clone()
-                        : default;
-                    NotificationReceived?.Invoke(this, new CodexNotification(method.GetString() ?? string.Empty, parameters));
+                    ReportDiagnostic($"malformed_json: {exception.Message}");
+                    // One malformed line must not tear down the transport.
+                }
+                catch (Exception exception)
+                {
+                    ReportDiagnostic($"message_dispatch_error: {exception.GetType().Name}: {exception.Message}");
+                    // Consumer/event-handler errors are isolated from the reader.
                 }
             }
         }
-        catch (Exception exception) when (exception is IOException or JsonException or InvalidDataException or ObjectDisposedException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or ObjectDisposedException)
         {
-            failure = exception;
+            transportFailure = exception;
         }
         finally
         {
             if (!_stop.IsCancellationRequested)
             {
-                var exception = failure ?? new EndOfStreamException("The Codex App Server closed its protocol stream.");
-                foreach (var pending in _pending.Values)
+                var exception = transportFailure ?? new EndOfStreamException("The Codex App Server closed its protocol stream.");
+                CompleteDisconnected(exception);
+            }
+        }
+    }
+
+    private void ProcessMessage(string line)
+    {
+        using var document = JsonDocument.Parse(line);
+        var root = document.RootElement;
+        if (root.TryGetProperty("id", out var id))
+        {
+            var idKey = id.GetRawText();
+            if (_pending.TryRemove(idKey, out var pending))
+            {
+                if (root.TryGetProperty("error", out var error))
                 {
-                    pending.TrySetException(exception);
+                    var message = error.TryGetProperty("message", out var errorMessage)
+                        ? errorMessage.GetString()
+                        : "The Codex App Server request failed.";
+                    pending.TrySetException(new CodexProtocolException(
+                        message ?? "The Codex App Server request failed.",
+                        error));
+                }
+                else if (root.TryGetProperty("result", out var result))
+                {
+                    pending.TrySetResult(result.Clone());
+                }
+                else
+                {
+                    pending.TrySetException(new CodexProtocolException(
+                        "The Codex App Server response contained neither result nor error.",
+                        root.Clone()));
                 }
 
-                _pending.Clear();
-                Disconnected?.Invoke(this, exception);
+                return;
             }
+
+            if (root.TryGetProperty("method", out var serverMethod))
+            {
+                var parameters = root.TryGetProperty("params", out var requestParams)
+                    ? requestParams.Clone()
+                    : default;
+                DispatchServerRequest(new CodexServerRequest(
+                    idKey,
+                    serverMethod.GetString() ?? string.Empty,
+                    parameters));
+            }
+
+            return;
+        }
+
+        if (root.TryGetProperty("method", out var method))
+        {
+            var parameters = root.TryGetProperty("params", out var notificationParams)
+                ? notificationParams.Clone()
+                : default;
+            DispatchNotification(new CodexNotification(method.GetString() ?? string.Empty, parameters));
+        }
+        else
+        {
+            ReportDiagnostic("protocol_message_without_id_or_method");
+        }
+    }
+
+    private void DispatchNotification(CodexNotification notification)
+    {
+        try
+        {
+            NotificationReceived?.Invoke(this, notification);
+        }
+        catch (Exception exception)
+        {
+            ReportDiagnostic($"notification_handler_error: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    private void DispatchServerRequest(CodexServerRequest request)
+    {
+        try
+        {
+            ServerRequestReceived?.Invoke(this, request);
+        }
+        catch (Exception exception)
+        {
+            ReportDiagnostic($"server_request_handler_error: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    private void CompleteDisconnected(Exception exception)
+    {
+        if (Interlocked.Exchange(ref _disconnectRaised, 1) != 0)
+        {
+            return;
+        }
+
+        foreach (var pending in _pending.Values)
+        {
+            pending.TrySetException(exception);
+        }
+
+        _pending.Clear();
+        try
+        {
+            Disconnected?.Invoke(this, exception);
+        }
+        catch (Exception handlerException)
+        {
+            ReportDiagnostic($"disconnect_handler_error: {handlerException.GetType().Name}: {handlerException.Message}");
+        }
+    }
+
+    private void ReportDiagnostic(string message)
+    {
+        try
+        {
+            Diagnostic?.Invoke(this, message.Length > 512 ? message[..512] : message);
+        }
+        catch
+        {
+            // Diagnostics are best effort and must never affect protocol flow.
         }
     }
 }
