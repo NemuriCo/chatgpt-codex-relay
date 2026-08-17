@@ -41,23 +41,26 @@
 
             <Grid Grid.Row="0" MinHeight="44" Margin="14,0,12,0" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,10,0">
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" /><Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" /><Ellipse Width="3" Height="3" Fill="#7D8A9C" /></StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,3,0,0"><Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" /><Ellipse Width="3" Height="3" Fill="#7D8A9C" Margin="0,0,3,0" /><Ellipse Width="3" Height="3" Fill="#7D8A9C" /></StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Ui.ProductName}" FontSize="15" FontWeight="SemiBold" /><TextBlock Text="{Binding Ui.ProductSubtitle}" Foreground="#8E9AAC" FontSize="10" Margin="0,1,0,0" /></StackPanel>
-                <ui:Button Grid.Column="2" Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="{Binding AlwaysOnTopAppearance}" Command="{Binding ToggleAlwaysOnTopCommand}" ToolTip="{Binding AlwaysOnTopToolTip}" Icon="{ui:SymbolIcon Pin16}" />
-                <ui:Button Grid.Column="3" Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Command="{Binding ToggleCollapsedCommand}" ToolTip="{Binding CollapseToolTip}" Icon="{ui:SymbolIcon ChevronUp16}" />
-                <ui:Button Grid.Column="4" Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Command="{Binding OpenProjectManagementCommand}" ToolTip="{Binding Ui.Settings}" Icon="{ui:SymbolIcon MoreHorizontal20}" />
-                <ui:Button Grid.Column="5" Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Click="HideButton_Click" ToolTip="{Binding Ui.HideToTray}" Icon="{ui:SymbolIcon Dismiss16}" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <ui:Button Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="{Binding AlwaysOnTopAppearance}" Command="{Binding ToggleAlwaysOnTopCommand}" ToolTip="{Binding AlwaysOnTopToolTip}" Icon="{ui:SymbolIcon Pin16}" />
+                    <ui:Button Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Command="{Binding ToggleCollapsedCommand}" ToolTip="{Binding CollapseToolTip}" Icon="{ui:SymbolIcon ChevronUp16}" />
+                    <ui:Button Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Command="{Binding OpenProjectManagementCommand}" ToolTip="{Binding Ui.Settings}" Icon="{ui:SymbolIcon MoreHorizontal20}" />
+                    <ui:Button Width="30" Height="28" Padding="0" Margin="3,0,0,0" Appearance="Secondary" Click="HideButton_Click" ToolTip="{Binding Ui.HideToTray}" Icon="{ui:SymbolIcon Dismiss16}" />
+                </StackPanel>
             </Grid>
             <Grid Grid.Row="0" MinHeight="44" Margin="14,0,12,0" Visibility="{Binding IsCollapsed, Converter={StaticResource BoolToVisibility}}">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Ellipse Width="6" Height="6" Fill="#72C7A5" Margin="0,0,8,0" /><TextBlock Text="{Binding Ui.ProductName}" FontSize="13" FontWeight="SemiBold" /></StackPanel>
-                <ui:Button Grid.Column="1" Width="30" Height="28" Padding="0" Appearance="Secondary" Command="{Binding ToggleCollapsedCommand}" ToolTip="{Binding CollapseToolTip}" Icon="{ui:SymbolIcon ChevronDown16}" />
+                <StackPanel Grid.Column="1" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                    <ui:Button Width="30" Height="28" Padding="0" Appearance="Secondary" Command="{Binding ToggleCollapsedCommand}" ToolTip="{Binding CollapseToolTip}" Icon="{ui:SymbolIcon ChevronDown16}" />
+                </StackPanel>
             </Grid>
 
             <Grid Grid.Row="1" Margin="12,0,12,12" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
