@@ -1,10 +1,43 @@
 const assert = require("assert");
 const fs = require("fs");
+const path = require("path");
 const utils = require("../shared/utils.js");
 const manifest = require("../manifest.json");
 
 assert.deepStrictEqual(manifest.permissions, ["storage", "tabs"]);
 assert.deepStrictEqual(manifest.optional_permissions, ["clipboardRead", "clipboardWrite"]);
+assert.deepStrictEqual(manifest.icons, {
+  "16": "icons/icon16.png",
+  "32": "icons/icon32.png",
+  "48": "icons/icon48.png",
+  "128": "icons/icon128.png"
+});
+assert.deepStrictEqual(manifest.action.default_icon, {
+  "16": "icons/icon16.png",
+  "32": "icons/icon32.png"
+});
+for (const size of [16, 32, 48, 128]) {
+  const png = fs.readFileSync(path.join(__dirname, "..", "icons", `icon${size}.png`));
+  assert.strictEqual(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  assert.strictEqual(png.readUInt32BE(16), size);
+  assert.strictEqual(png.readUInt32BE(20), size);
+}
+const ico = fs.readFileSync(path.join(__dirname, "..", "..", "src", "BlueRelay", "Assets", "Icons", "BlueRelay.ico"));
+assert.strictEqual(ico.readUInt16LE(0), 0);
+assert.strictEqual(ico.readUInt16LE(2), 1);
+assert.strictEqual(ico.readUInt16LE(4), 8);
+const icoSizes = Array.from({ length: 8 }, (_, index) => {
+  const entry = 6 + index * 16;
+  const width = ico[entry] || 256;
+  const height = ico[entry + 1] || 256;
+  const byteLength = ico.readUInt32LE(entry + 8);
+  const offset = ico.readUInt32LE(entry + 12);
+  assert.strictEqual(height, width);
+  assert.ok(offset + byteLength <= ico.length);
+  assert.strictEqual(ico.subarray(offset, offset + 8).toString("hex"), "89504e470d0a1a0a");
+  return width;
+});
+assert.deepStrictEqual(icoSizes, [16, 20, 24, 32, 48, 64, 128, 256]);
 assert.strictEqual(utils.detectCodexTask("hello"), false);
 assert.strictEqual(utils.detectCodexTask("# CODEX_TASK\n请实现 bridge"), true);
 assert.strictEqual(utils.normalizeTaskText("  a\r\nb  "), "a\nb");

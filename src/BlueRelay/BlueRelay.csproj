@@ -11,10 +11,12 @@
     <RootNamespace>BlueRelay</RootNamespace>
     <Product>BlueRelay</Product>
     <Description>A local ChatGPT Web and Codex workflow relay for Windows.</Description>
+    <ApplicationIcon>Assets\Icons\BlueRelay.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.3.0" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Resource Include="Assets\Icons\BlueRelay.ico" />
   </ItemGroup>
 </Project>

@@ -109,6 +109,8 @@ browser-extension/
 
 BlueRelay uses [WPF UI](https://github.com/lepoco/wpfui) 4.3.0 under the MIT License for its dark theme, Fluent controls, and Fluent System Icons. The required license and third-party notices are included in [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES).
 
+The unified BlueRelay application icon reuses the same `Flow20` / Fluent System Icons `Flow 20 Regular` path shown in the empty workflow state. Windows and the browser extension derive their icon assets from [`BlueRelay-flow-20-regular.svg`](src/BlueRelay/Assets/Icons/BlueRelay-flow-20-regular.svg); the existing Fluent System Icons MIT notice above covers this bundled asset.
+
 ## Running locally
 
 Requirements:

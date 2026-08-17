@@ -5,6 +5,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="BlueRelay"
+        Icon="Assets/Icons/BlueRelay.ico"
         Width="378"
         Height="320"
         MinWidth="360"
@@ -76,7 +77,7 @@
                                             <Grid>
                                                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                                <StackPanel><TextBlock Text="{Binding ProjectName}" Foreground="#AEBAC8" FontSize="11" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding WorkstreamName}" FontSize="15" FontWeight="SemiBold" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" /></StackPanel>
+                                                <StackPanel><TextBlock Text="{Binding ProjectName}" Foreground="#F4F5F7" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding WorkstreamName}" Foreground="#AEBAC8" FontSize="13" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" /></StackPanel>
                                                 <ui:Button Grid.Column="1" Width="30" Height="28" Padding="0" Appearance="Secondary" Tag="{Binding DataContext, Source={x:Reference RootWindow}}" Click="OpenContextMenuButton_Click" Icon="{ui:SymbolIcon MoreHorizontal20}">
                                                     <ui:Button.ContextMenu><ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
                                                         <ui:MenuItem Header="{Binding Ui.CompleteCurrentRound}" Icon="{ui:SymbolIcon CheckmarkCircle12}" Command="{Binding CompleteCurrentRoundCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
