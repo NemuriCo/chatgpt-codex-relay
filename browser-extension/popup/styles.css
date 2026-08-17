@@ -7,6 +7,14 @@ p { margin: 5px 0; line-height: 1.45; } header p { color: #8e9aac; font-size: 11
 .dot, .ok-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #72c7a5; }
 .panel { border: 1px solid #344255; border-radius: 10px; background: #1a202a; padding: 12px; margin-bottom: 10px; }
 .status { display: flex; align-items: center; gap: 7px; color: #9ed4c0; font-size: 12px; margin-bottom: 11px; }
+.tab-bridge-status { display: flex; align-items: center; gap: 7px; color: #d9b979; font-size: 11px; margin: -4px 0 11px; }
+.tab-bridge-status[data-state="connected"] { color: #9ed4c0; }
+.tab-bridge-status[data-state="failed"] { color: #ff9b9b; }
+.bridge-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: #d9b979; flex: 0 0 auto; }
+.tab-bridge-status[data-state="connected"] .bridge-dot { background: #72c7a5; }
+.tab-bridge-status[data-state="failed"] .bridge-dot { background: #ff7777; }
+.tab-bridge-status .secondary { width: auto; margin: 0 0 0 auto; padding: 4px 7px; background: #354457; font-size: 11px; font-weight: 500; }
+.tab-bridge-status .secondary:hover { background: #44576e; }
 .muted { color: #9ba8b8; font-size: 11px; overflow-wrap: anywhere; }
 .tab-title { color: #edf2f7; font-size: 13px; line-height: 1.35; margin: 0 0 11px; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .status-text { color: #82bfe2; font-size: 12px; font-weight: 600; }

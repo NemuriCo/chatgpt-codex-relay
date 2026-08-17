@@ -4,9 +4,11 @@
   "version": "0.2.0",
   "description": "Local-only ChatGPT tab bridge for BlueRelay.",
   "default_locale": "en",
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage", "tabs", "scripting"],
   "optional_permissions": ["clipboardRead", "clipboardWrite"],
   "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
     "http://127.0.0.1:48917/*",
     "http://localhost:48917/*"
   ],
@@ -33,7 +35,7 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*"
       ],
-      "js": ["shared/utils.js", "content-script.js"],
+      "js": ["shared/utils.js", "shared/runtime-lifecycle.js", "content-script.js"],
       "run_at": "document_idle"
     }
   ],

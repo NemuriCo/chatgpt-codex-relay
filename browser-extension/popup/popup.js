@@ -10,7 +10,23 @@
   const clipboardReader = utils.createClipboardReader(clipboardPermissions, navigator.clipboard);
 
   function call(message) {
-    return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (response) => {
+        if (settled) return;
+        settled = true;
+        resolve(response);
+      };
+      try {
+        const result = chrome.runtime.sendMessage(message, (response) => {
+          const lastError = chrome.runtime.lastError;
+          finish(lastError ? { success: false, code: "runtime_message_failed", message: lastError.message } : response);
+        });
+        if (result && typeof result.then === "function") result.then(finish, (error) => finish({ success: false, code: "runtime_message_failed", message: error.message }));
+      } catch (error) {
+        finish({ success: false, code: "runtime_message_failed", message: error.message });
+      }
+    });
   }
 
   function show(id, visible) {
@@ -26,6 +42,15 @@
 
   function text(key, fallback) {
     return chrome.i18n.getMessage(key) || fallback;
+  }
+
+  function setTabBridgeState(state) {
+    const status = $("tabBridgeStatus");
+    const label = $("tabBridgeText");
+    const messageKey = state === "connected" ? "tabConnected" : state === "failed" ? "tabBridgeFailed" : "tabBridgeRecovering";
+    status.dataset.state = state;
+    label.textContent = text(messageKey, state === "connected" ? "ChatGPT tab connected" : state === "failed" ? "ChatGPT tab bridge failed" : "ChatGPT tab bridge is reconnecting");
+    show("reconnectButton", state === "failed");
   }
 
   async function render() {
@@ -51,6 +76,10 @@
       show("pairing", true);
       return;
     }
+
+    setTabBridgeState("recovering");
+    const recovery = await call({ type: "POPUP_ENSURE_TAB", tabId: activeTab.id });
+    setTabBridgeState(recovery && recovery.success ? "connected" : "failed");
 
     await clipboardReader.refreshPermission();
     const response = await call({ type: "POPUP_WORKSTREAMS" });
@@ -92,6 +121,17 @@
     const response = await call({ type: "POPUP_BIND", tabId: activeTab.id, workstreamId: $("workstreamSelect").value });
     $("bindStatus").textContent = response && response.success ? text("tabBound", "ChatGPT tab bound") : (response?.message || text("bindingFailed", "Binding failed."));
     if (response && response.success) await render();
+  });
+
+  $("reconnectButton").addEventListener("click", async () => {
+    if (!activeTab) return;
+    setTabBridgeState("recovering");
+    const recovery = await call({ type: "POPUP_ENSURE_TAB", tabId: activeTab.id });
+    if (recovery && recovery.success) {
+      await render();
+    } else {
+      setTabBridgeState("failed");
+    }
   });
 
   $("clipboardButton").addEventListener("click", async () => {

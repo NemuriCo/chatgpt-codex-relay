@@ -39,7 +39,7 @@
     try {
       const parsed = new URL(url);
       return parsed.protocol === "https:" &&
-        (parsed.hostname === "chatgpt.com" || parsed.hostname.endsWith(".chatgpt.com") || parsed.hostname === "chat.openai.com");
+        (parsed.hostname === "chatgpt.com" || parsed.hostname === "chat.openai.com");
     } catch (_) {
       return false;
     }

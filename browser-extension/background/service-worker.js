@@ -1,7 +1,9 @@
-importScripts("../shared/utils.js", "../shared/bridge-client.js");
+importScripts("../shared/utils.js", "../shared/runtime-lifecycle.js", "../shared/bridge-client.js");
 
 const utils = self.BlueRelayUtils;
+const lifecycleUtils = self.BlueRelayRuntimeLifecycle;
 const bridge = self.BlueRelayBridgeClient;
+const CONTENT_SCRIPT_FILES = ["shared/utils.js", "shared/runtime-lifecycle.js", "content-script.js"];
 
 function tabPayload(tab) {
   return {
@@ -20,6 +22,65 @@ async function ensureRegistered(tab) {
   payload.installationId = config.installationId;
   await bridge.registerTab(payload);
   return { config, payload };
+}
+
+function lifecycleLog(tab, stage, code) {
+  console.info("[BlueRelay] content-script lifecycle", {
+    tabId: tab?.id === undefined ? null : String(tab.id),
+    stage,
+    code: code || "unknown"
+  });
+}
+
+function runtimeFailureCode(error, fallback = "runtime_message_failed") {
+  return lifecycleUtils?.classifyRuntimeMessageFailure
+    ? lifecycleUtils.classifyRuntimeMessageFailure(error)
+    : (error?.code || fallback);
+}
+
+async function pingContentScript(tab) {
+  try {
+    const response = await chrome.tabs.sendMessage(tab.id, { type: "BLUERELAY_PING" });
+    if (lifecycleUtils.isLiveContentScriptResponse(response)) {
+      return { success: true, response, code: "alive" };
+    }
+
+    return { success: false, code: response?.code || "ping_no_response" };
+  } catch (error) {
+    return { success: false, code: runtimeFailureCode(error, "ping_failed") };
+  }
+}
+
+const ensureContentScript = lifecycleUtils.createContentScriptEnsurer({
+  isSupportedUrl: (url) => utils.isSupportedChatGptUrl(url),
+  ping: pingContentScript,
+  inject: (tab, files) => {
+    if (!chrome.scripting?.executeScript) return Promise.reject({ code: "scripting_unavailable" });
+    return chrome.scripting.executeScript({ target: { tabId: tab.id }, files });
+  },
+  log: lifecycleLog,
+  files: CONTENT_SCRIPT_FILES
+});
+
+async function recoverTab(tab) {
+  const result = await ensureContentScript(tab);
+  if (result.success && !result.injected) {
+    await registerAndPoll(tab);
+  }
+  return result;
+}
+
+async function ensureOpenChatGptTabs() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(tabs
+      .filter((tab) => utils.isSupportedChatGptUrl(tab.url || ""))
+      .map((tab) => recoverTab(tab).catch((error) => {
+        lifecycleLog(tab, "ready", error?.code || "recovery_failed");
+      })));
+  } catch (error) {
+    lifecycleLog(null, "ready", error?.code || "tab_query_failed");
+  }
 }
 
 function deliveryLog(stage, command, code) {
@@ -144,6 +205,18 @@ async function handleContentMessage(message, sender) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "POPUP_ENSURE_TAB") {
+    (async () => {
+      const tab = await chrome.tabs.get(message.tabId);
+      const result = await ensureContentScript(tab);
+      if (result.success && !result.injected) {
+        await registerAndPoll(tab);
+      }
+      sendResponse(result);
+    })().catch((error) => sendResponse({ success: false, code: errorCode(error, "tab_recovery_failed"), message: error.message }));
+    return true;
+  }
+
   if (message.type === "POPUP_HEALTH") {
     bridge.health().then((data) => sendResponse({ success: true, data })).catch((error) => sendResponse({ success: false, message: error.message, code: error.code }));
     return true;
@@ -162,6 +235,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "POPUP_BIND") {
     (async () => {
       const tab = await chrome.tabs.get(message.tabId);
+      const recovery = await ensureContentScript(tab);
+      if (!recovery.success) {
+        sendResponse({ success: false, code: recovery.code, message: recovery.code === "unsupported_origin" ? "The current page is not a supported ChatGPT page." : "Unable to reconnect the ChatGPT tab." });
+        return;
+      }
       const registration = await ensureRegistered(tab);
       const data = await bridge.bindTab({ installationId: registration.config.installationId, tabId: String(tab.id), workstreamId: message.workstreamId });
       sendResponse({ success: true, data });
@@ -173,4 +251,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-chrome.runtime.onInstalled.addListener(() => bridge.getConfig().catch(() => undefined));
+chrome.runtime.onInstalled.addListener(() => {
+  bridge.getConfig().catch(() => undefined);
+  void ensureOpenChatGptTabs();
+});
+
+chrome.runtime.onStartup?.addListener(() => {
+  void ensureOpenChatGptTabs();
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const candidateUrl = changeInfo.url || tab.url || "";
+  if ((changeInfo.status === "complete" || changeInfo.url) && utils.isSupportedChatGptUrl(candidateUrl)) {
+    void recoverTab(Object.assign({}, tab, { id: tabId, url: candidateUrl }));
+  }
+});
+
+void ensureOpenChatGptTabs();
