@@ -5,6 +5,7 @@
   "description": "Local-only ChatGPT tab bridge for BlueRelay.",
   "default_locale": "en",
   "permissions": ["storage", "tabs"],
+  "optional_permissions": ["clipboardRead"],
   "host_permissions": [
     "http://127.0.0.1:48917/*",
     "http://localhost:48917/*"

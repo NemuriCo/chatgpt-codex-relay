@@ -3,6 +3,11 @@
   const $ = (id) => document.getElementById(id);
   let activeTab = null;
   let workstreams = [];
+  const clipboardPermissions = {
+    contains: (...args) => chrome.permissions.contains(...args),
+    request: (...args) => chrome.permissions.request(...args)
+  };
+  const clipboardReader = utils.createClipboardReader(clipboardPermissions, navigator.clipboard);
 
   function call(message) {
     return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
@@ -45,6 +50,7 @@
       return;
     }
 
+    await clipboardReader.refreshPermission();
     const response = await call({ type: "POPUP_WORKSTREAMS" });
     if (!response || !response.success) {
       $("bindStatus").textContent = response?.message || text("unableList", "Unable to list Workstreams.");
@@ -87,13 +93,17 @@
   });
 
   $("clipboardButton").addEventListener("click", async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      const response = await call({ type: "POPUP_CAPTURE_CLIPBOARD", tabId: activeTab && activeTab.id, prompt: text });
-      $("captureStatus").textContent = response && response.success ? text("taskCaptured", "Task captured") : (response?.message || text("clipboardFailed", "Clipboard capture failed."));
-    } catch (error) {
-      $("captureStatus").textContent = error.message;
+    const clipboardResult = await clipboardReader.readText();
+    if (!clipboardResult.success) {
+      const message = clipboardResult.reason === "permission-denied"
+        ? text("clipboardPermissionRequired", "Clipboard read permission is required to use this fallback capture feature.")
+        : text("clipboardFailed", "Clipboard capture failed.");
+      $("captureStatus").textContent = message;
+      return;
     }
+
+    const response = await call({ type: "POPUP_CAPTURE_CLIPBOARD", tabId: activeTab && activeTab.id, prompt: clipboardResult.text });
+    $("captureStatus").textContent = response && response.success ? text("taskCaptured", "Task captured") : (response?.message || text("clipboardFailed", "Clipboard capture failed."));
   });
 
   render().catch((error) => {

@@ -21,5 +21,6 @@
   "pairFailed": { "message": "配对失败。" },
   "bindingFailed": { "message": "绑定失败。" },
   "taskCaptured": { "message": "任务已捕获。" },
-  "clipboardFailed": { "message": "剪贴板捕获失败。" }
+  "clipboardFailed": { "message": "剪贴板捕获失败。" },
+  "clipboardPermissionRequired": { "message": "需要剪贴板读取权限才能使用此备用捕获功能。" }
 }

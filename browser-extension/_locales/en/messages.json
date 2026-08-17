@@ -21,5 +21,6 @@
   "pairFailed": { "message": "Pairing failed." },
   "bindingFailed": { "message": "Binding failed." },
   "taskCaptured": { "message": "Task captured" },
-  "clipboardFailed": { "message": "Clipboard capture failed." }
+  "clipboardFailed": { "message": "Clipboard capture failed." },
+  "clipboardPermissionRequired": { "message": "Clipboard read permission is required to use this fallback capture feature." }
 }

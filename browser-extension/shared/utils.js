@@ -60,6 +60,54 @@
     }) || candidates.find((element) => !element.disabled) || null;
   }
 
+  function createClipboardReader(permissionsApi, clipboardApi) {
+    const permission = { permissions: ["clipboardRead"] };
+    let permissionChecked = false;
+    let permissionGranted = false;
+
+    async function refreshPermission() {
+      permissionChecked = true;
+      try {
+        permissionGranted = await permissionsApi.contains(permission);
+      } catch (_) {
+        permissionGranted = false;
+      }
+      return permissionGranted;
+    }
+
+    async function readText() {
+      if (!permissionChecked) {
+        return { success: false, reason: "permission-check-failed" };
+      }
+
+      if (!permissionGranted) {
+        let granted = false;
+        try {
+          // This call is reached synchronously from the Popup click handler.
+          granted = await permissionsApi.request(permission);
+        } catch (_) {
+          granted = false;
+        }
+        if (!granted) {
+          return { success: false, reason: "permission-denied" };
+        }
+        permissionGranted = true;
+      }
+
+      if (!clipboardApi || typeof clipboardApi.readText !== "function") {
+        return { success: false, reason: "read-failed" };
+      }
+
+      try {
+        return { success: true, text: await clipboardApi.readText() };
+      } catch (_) {
+        return { success: false, reason: "read-failed" };
+      }
+    }
+
+    return { refreshPermission, readText };
+  }
+
   return {
     CODEX_TASK_MARKER,
     normalizeTaskText,
@@ -67,6 +115,7 @@
     extractConversationId,
     isSupportedChatGptUrl,
     renderWorkstreamLabel,
-    findComposer
+    findComposer,
+    createClipboardReader
   };
 });
