@@ -68,10 +68,13 @@ async function pollCommand(tab, config, payload) {
 
   if (!response || response.success !== true) {
     const code = response?.code || "injection_failed";
-    deliveryLog(code === "composer_not_found" ? "composer_not_found" : "composer_injection_failed", command, code);
-    const acknowledgementCode = response?.fallback === "clipboard"
-      ? "clipboard_fallback"
-      : response?.fallbackCode || code;
+    const stage = code === "composer_not_found"
+      ? "composer_not_found"
+      : code === "composer_reconciled"
+        ? "composer_reconciled"
+        : "composer_injection_failed";
+    deliveryLog(stage, command, code);
+    const acknowledgementCode = code || response?.fallbackCode || "injection_failed";
     await acknowledgeCommand(command, false, acknowledgementCode, response?.method);
     return;
   }

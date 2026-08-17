@@ -71,10 +71,34 @@
     window.setTimeout(() => notice.remove(), 6000);
   }
 
+  function logComposerInjection(injection) {
+    const diagnostics = injection?.diagnostics || {};
+    console.info("[BlueRelay] composer injection", {
+      stage: diagnostics.stage || "injection",
+      method: injection?.method || diagnostics.method || null,
+      composerId: diagnostics.composerId || null,
+      tagName: diagnostics.tagName || null,
+      contentEditable: diagnostics.contentEditable ?? null,
+      role: diagnostics.role || null,
+      childElementCount: diagnostics.childElementCount ?? null,
+      hasParagraph: diagnostics.hasParagraph ?? null,
+      hasProseMirror: diagnostics.hasProseMirror ?? null,
+      childTags: diagnostics.childTags || [],
+      focusable: diagnostics.focusable ?? null,
+      immediateVerification: injection?.immediateVerification ?? null,
+      verification1: injection?.verification1 ?? null,
+      verification2: injection?.verification2 ?? null,
+      resultLength: injection?.resultLength ?? null,
+      existingLength: injection?.existingLength ?? null,
+      code: injection?.code || null
+    });
+  }
+
   async function handleCommand(message) {
     if (message.type !== "INJECT_RESULT") return;
     const command = message.command;
-    const injection = utils.injectComposerResult(command.result, document);
+    const injection = await utils.injectComposerResult(command.result, document);
+    logComposerInjection(injection);
     if (injection.success) {
       return injection;
     }

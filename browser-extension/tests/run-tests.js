@@ -1,4 +1,5 @@
 const assert = require("assert");
+const fs = require("fs");
 const utils = require("../shared/utils.js");
 const manifest = require("../manifest.json");
 
@@ -28,6 +29,11 @@ function fakeElement({ id = "", tagName = "DIV", attrs = {}, value = "", text = 
     getBoundingClientRect: () => ({ width: visible ? 320 : 0, height: visible ? 48 : 0 }),
     focus: () => { element.focused = true; },
     dispatchEvent: (event) => { element.events.push(event.type); return true; },
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    children: [],
+    childElementCount: 0,
+    className: "",
     events: []
   };
   return element;
@@ -47,48 +53,121 @@ const searchBox = fakeElement({ attrs: { type: "search", "aria-label": "Search c
 const messageBox = fakeElement({ attrs: { role: "textbox", "aria-label": "Message" }, text: "" });
 assert.strictEqual(utils.findComposer(fakeRoot(null, [searchBox, messageBox])), messageBox);
 
-const textarea = fakeElement({ id: "prompt-textarea", tagName: "TEXTAREA", value: "Existing input" });
-textarea.ownerDocument = { defaultView: { Event: class TestEvent { constructor(type) { this.type = type; } } } };
-const textareaResult = utils.injectComposerResult("new result", fakeRoot(textarea, [textarea]));
-assert.deepStrictEqual(textareaResult, {
-  success: true,
-  method: "prompt-textarea-value",
-  appended: true
-});
-assert.strictEqual(textarea.value, "Existing input\n\nnew result");
-assert.ok(textarea.events.includes("input"));
+function fastTiming(onWait) {
+  return {
+    waitForFrame: async () => {},
+    wait: async (milliseconds) => {
+      onWait?.(milliseconds);
+    }
+  };
+}
 
-const editor = fakeElement({ id: "prompt-textarea", tagName: "DIV", text: "Existing input" });
-const editorDocument = {
-  defaultView: {
-    getSelection: () => ({ removeAllRanges: () => {}, addRange: () => {} })
-  },
-  createRange: () => ({
-    selectNodeContents: () => {},
-    collapse: () => {},
-    insertNode: (node) => {
-      editor.innerText += node.textContent;
-      editor.textContent = editor.innerText;
+function createEditorFixture({ text = "", execCommand, className = "ProseMirror" } = {}) {
+  const editor = fakeElement({ id: "prompt-textarea", tagName: "DIV", text });
+  const block = fakeElement({ tagName: "P", text });
+  editor.children = [block];
+  editor.childElementCount = 1;
+  editor.className = className;
+  editor.querySelector = (selector) => selector === "p" ? block : null;
+  editor.querySelectorAll = (selector) => selector === "p" ? [block] : [];
+  const documentRef = {
+    defaultView: {
+      Event: class TestEvent { constructor(type) { this.type = type; } },
+      getSelection: () => ({ removeAllRanges: () => {}, addRange: () => {} })
     },
-    setStartAfter: () => {}
-  }),
-  createTextNode: (text) => ({ textContent: text }),
-  execCommand: (_command, _showUi, text) => {
-    editor.innerText += text;
-    editor.textContent = editor.innerText;
-    return true;
-  }
-};
-editor.ownerDocument = editorDocument;
-const editorResult = utils.injectComposerResult("editor result", fakeRoot(editor, [editor]));
-assert.strictEqual(editorResult.success, true);
-assert.strictEqual(editorResult.method, "prompt-textarea-contenteditable");
-assert.ok(editor.innerText.includes("editor result"));
+    createRange: () => ({
+      selectNodeContents: () => {},
+      collapse: () => {},
+      insertNode: (node) => {
+        editor.innerText += node.textContent;
+        editor.textContent = editor.innerText;
+      },
+      setStartAfter: () => {}
+    }),
+    createTextNode: (nodeText) => ({ textContent: nodeText }),
+    execCommand: execCommand || ((_command, _showUi, insertedText) => {
+      editor.innerText += insertedText;
+      editor.textContent = editor.innerText;
+      return true;
+    })
+  };
+  editor.ownerDocument = documentRef;
+  return { editor, documentRef, root: fakeRoot(editor, [editor]) };
+}
 
-assert.deepStrictEqual(utils.injectComposerResult("result", fakeRoot(null, [])), {
-  success: false,
-  code: "composer_not_found"
-});
+async function testComposerInjection() {
+  const textarea = fakeElement({ id: "prompt-textarea", tagName: "TEXTAREA", value: "Existing input" });
+  textarea.ownerDocument = { defaultView: { Event: class TestEvent { constructor(type) { this.type = type; } } } };
+  const textareaResult = await utils.injectComposerResult(
+    "new result",
+    fakeRoot(textarea, [textarea]),
+    { timing: fastTiming() });
+  assert.strictEqual(textareaResult.success, true);
+  assert.strictEqual(textareaResult.method, "prompt-textarea-value");
+  assert.strictEqual(textareaResult.appended, true);
+  assert.strictEqual(textareaResult.verification1, true);
+  assert.strictEqual(textareaResult.verification2, true);
+  assert.strictEqual(textarea.value, "Existing input\n\nnew result");
+  assert.ok(textarea.events.includes("input"));
+
+  const editorFixture = createEditorFixture({ text: "Existing input" });
+  const editorWaits = [];
+  const editorResult = await utils.injectComposerResult(
+    "editor result",
+    editorFixture.root,
+    { timing: fastTiming((milliseconds) => editorWaits.push(milliseconds)) });
+  assert.strictEqual(editorResult.success, true);
+  assert.strictEqual(editorResult.method, "prompt-textarea-contenteditable");
+  assert.strictEqual(editorResult.verification1, true);
+  assert.strictEqual(editorResult.verification2, true);
+  assert.strictEqual(editorResult.diagnostics.hasProseMirror, true);
+  assert.strictEqual(editorResult.diagnostics.focusable, true);
+  assert.deepStrictEqual(editorWaits, [220, 320]);
+  assert.ok(!JSON.stringify(editorResult.diagnostics).includes("editor result"));
+  assert.ok(editorFixture.editor.innerText.includes("editor result"));
+
+  let waitCount = 0;
+  const reconciledFixture = createEditorFixture({
+    execCommand: () => false
+  });
+  const reconciledResult = await utils.injectComposerResult(
+    "unstable result",
+    reconciledFixture.root,
+    {
+      timing: fastTiming(() => {
+        waitCount += 1;
+        if (waitCount === 2) {
+          reconciledFixture.editor.innerText = "";
+          reconciledFixture.editor.textContent = "";
+        }
+      })
+    });
+  assert.strictEqual(reconciledResult.success, false);
+  assert.strictEqual(reconciledResult.code, "composer_reconciled");
+  assert.strictEqual(reconciledResult.method, "prompt-textarea-contenteditable-range");
+  assert.strictEqual(reconciledResult.immediateVerification, true);
+  assert.strictEqual(reconciledResult.verification1, true);
+  assert.strictEqual(reconciledResult.verification2, false);
+
+  reconciledFixture.editor.innerText = "";
+  reconciledFixture.editor.textContent = "";
+  reconciledFixture.documentRef.execCommand = (_command, _showUi, insertedText) => {
+    reconciledFixture.editor.innerText += insertedText;
+    reconciledFixture.editor.textContent = reconciledFixture.editor.innerText;
+    return true;
+  };
+  const retryResult = await utils.injectComposerResult(
+    "retry result",
+    reconciledFixture.root,
+    { timing: fastTiming() });
+  assert.strictEqual(retryResult.success, true);
+  assert.ok(reconciledFixture.editor.innerText.includes("retry result"));
+
+  assert.deepStrictEqual(await utils.injectComposerResult("result", fakeRoot(null, []), { timing: fastTiming() }), {
+    success: false,
+    code: "composer_not_found"
+  });
+}
 
 async function testClipboardReader() {
   let requestCount = 0;
@@ -141,9 +220,19 @@ async function testClipboardReader() {
   assert.strictEqual(deniedReads, 0);
 }
 
-testClipboardReader().then(() => {
+async function run() {
+  await testComposerInjection();
+  await testClipboardReader();
+
+  const contentScript = fs.readFileSync(require.resolve("../content-script.js"), "utf8");
+  assert.match(contentScript, /await utils\.injectComposerResult\(command\.result, document\)/);
+  const serviceWorker = fs.readFileSync(require.resolve("../background/service-worker.js"), "utf8");
+  assert.match(serviceWorker, /code === "composer_reconciled"/);
+  assert.match(serviceWorker, /const acknowledgementCode = code \|\| response\?\.fallbackCode/);
   console.log("browser-extension pure tests passed");
-}).catch((error) => {
+}
+
+run().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

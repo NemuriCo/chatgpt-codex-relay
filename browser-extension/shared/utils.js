@@ -73,6 +73,7 @@
 
   function isComposerCandidate(element, requireVisible = true) {
     if (!element || element.disabled || element.readOnly || isSearchLike(element)) return false;
+    if ((element.getAttribute?.("contenteditable") || "").toLocaleLowerCase() === "false") return false;
     if (element.closest?.("aside, nav")) return false;
     return !requireVisible || isVisible(element);
   }
@@ -121,6 +122,190 @@
     return existing.trim() ? `${existing}\n\n${result}` : result;
   }
 
+  function elementChildren(element) {
+    return element?.children ? Array.from(element.children) : [];
+  }
+
+  function elementClassName(element) {
+    const className = element?.className;
+    return typeof className === "string" ? className : String(className?.baseVal || "");
+  }
+
+  function composerDiagnostics(element, details = {}) {
+    const children = elementChildren(element);
+    const childTags = children.slice(0, 12)
+      .map((child) => child?.tagName?.toLocaleLowerCase())
+      .filter(Boolean);
+    const contentEditable = element?.getAttribute?.("contenteditable") ?? element?.contentEditable ?? null;
+    const hasParagraph = Boolean(element?.querySelector?.("p")) || childTags.includes("p");
+    return Object.assign({
+      composerId: element?.id || null,
+      tagName: element?.tagName?.toLocaleLowerCase() || null,
+      contentEditable,
+      role: element?.getAttribute?.("role") || null,
+      childElementCount: Number(element?.childElementCount ?? children.length),
+      hasParagraph,
+      hasProseMirror: /\bprosemirror\b/i.test(elementClassName(element)),
+      childTags
+    }, details);
+  }
+
+  function isEditableComposer(element) {
+    if (!element || element.disabled || element.readOnly) return false;
+    return (element.getAttribute?.("contenteditable") || "").toLocaleLowerCase() !== "false";
+  }
+
+  function isFocusableComposer(element) {
+    return isEditableComposer(element) && typeof element.focus === "function";
+  }
+
+  function findEditableBlock(composer) {
+    if (!composer?.querySelectorAll) return null;
+    const selectors = [
+      "p",
+      "li",
+      "blockquote",
+      "pre",
+      "h1, h2, h3, h4, h5, h6",
+      "[data-lexical-node]",
+      "[data-slate-node=\"element\"]"
+    ];
+    for (const selector of selectors) {
+      const blocks = Array.from(composer.querySelectorAll(selector))
+        .filter((element) => isEditableComposer(element));
+      if (blocks.length) return blocks[blocks.length - 1];
+    }
+    return null;
+  }
+
+  function getSelection(documentRef) {
+    return documentRef?.defaultView?.getSelection?.() || documentRef?.getSelection?.() || null;
+  }
+
+  function placeCaretAtEnd(composer, documentRef) {
+    if (!documentRef?.createRange) return { success: false, hasBlock: false };
+    let target = findEditableBlock(composer);
+    if (!target && typeof documentRef.execCommand === "function") {
+      try {
+        documentRef.execCommand("insertParagraph", false, null);
+        target = findEditableBlock(composer);
+      } catch (_) {
+        target = null;
+      }
+    }
+    target = target || composer;
+    const selection = getSelection(documentRef);
+    try {
+      const range = documentRef.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+      selection?.removeAllRanges?.();
+      selection?.addRange?.(range);
+      return { success: true, hasBlock: target !== composer, target, selection };
+    } catch (_) {
+      return { success: false, hasBlock: target !== composer, target, selection };
+    }
+  }
+
+  function waitForFrame(documentRef) {
+    const requestAnimationFrame = documentRef?.defaultView?.requestAnimationFrame;
+    if (typeof requestAnimationFrame === "function") {
+      return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  function waitForDelay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
+
+  function verifyInsertedText(root, result) {
+    const composer = findComposer(root);
+    return {
+      composer,
+      present: Boolean(composer && containsInsertedText(composer, result)),
+      editable: isEditableComposer(composer),
+      focusable: isFocusableComposer(composer)
+    };
+  }
+
+  async function verifyStableInjection(root, text, method, appended, initialComposer, existingLength, options = {}) {
+    const documentRef = root?.ownerDocument || (typeof document !== "undefined" ? document : null);
+    const timing = options.timing || {};
+    const frame = timing.waitForFrame || (() => waitForFrame(documentRef));
+    const delay = timing.wait || waitForDelay;
+    const initialVerification = true;
+
+    await frame();
+    await delay(220);
+    const verificationOne = verifyInsertedText(root, text);
+    const verificationOnePassed = verificationOne.present && verificationOne.editable && verificationOne.focusable;
+    if (!verificationOnePassed) {
+      return {
+        success: false,
+        code: "composer_reconciled",
+        method,
+        appended,
+        resultLength: text.length,
+        existingLength,
+        immediateVerification: initialVerification,
+        verification1: false,
+        verification2: false,
+        diagnostics: composerDiagnostics(verificationOne.composer || initialComposer, {
+          stage: "stable_verification",
+          method,
+          immediateVerification: initialVerification,
+          verification1: false,
+          verification2: false,
+          focusable: verificationOne.focusable,
+          resultLength: text.length,
+          existingLength
+        })
+      };
+    }
+
+    await delay(320);
+    const verificationTwo = verifyInsertedText(root, text);
+    const verificationTwoPassed = verificationTwo.present && verificationTwo.editable && verificationTwo.focusable;
+    const finalComposer = verificationTwo.composer || verificationOne.composer || initialComposer;
+    const diagnostics = composerDiagnostics(finalComposer, {
+      stage: "stable_verification",
+      method,
+      immediateVerification: initialVerification,
+      verification1: verificationOnePassed,
+      verification2: verificationTwoPassed,
+      focusable: verificationTwo.focusable,
+      resultLength: text.length,
+      existingLength
+    });
+    if (!verificationTwoPassed) {
+      return {
+        success: false,
+        code: "composer_reconciled",
+        method,
+        appended,
+        resultLength: text.length,
+        existingLength,
+        immediateVerification: initialVerification,
+        verification1: true,
+        verification2: false,
+        diagnostics
+      };
+    }
+
+    return {
+      success: true,
+      method,
+      appended,
+      resultLength: text.length,
+      existingLength,
+      immediateVerification: initialVerification,
+      verification1: true,
+      verification2: true,
+      diagnostics
+    };
+  }
+
   function dispatchEvent(element, type, init = {}) {
     const view = element?.ownerDocument?.defaultView || (typeof window !== "undefined" ? window : null);
     const EventType = type === "input" && view?.InputEvent ? view.InputEvent : view?.Event;
@@ -144,7 +329,7 @@
     else element.value = value;
   }
 
-  function injectComposerResult(result, root) {
+  async function injectComposerResult(result, root, options = {}) {
     const text = String(result || "");
     if (!text) return { success: false, code: "result_empty" };
 
@@ -164,29 +349,30 @@
         return { success: false, code: "injection_failed" };
       }
 
-      return composerText(composer) === nextText || containsInsertedText(composer, text)
-        ? { success: true, method: composer.id === "prompt-textarea" ? "prompt-textarea-value" : "textarea-value", appended: Boolean(existing.trim()) }
-        : { success: false, code: "injection_failed" };
+      if (!containsInsertedText(composer, text)) {
+        return { success: false, code: "injection_failed", resultLength: text.length, existingLength: existing.length };
+      }
+
+      return verifyStableInjection(
+        root,
+        text,
+        composer.id === "prompt-textarea" ? "prompt-textarea-value" : "textarea-value",
+        Boolean(existing.trim()),
+        composer,
+        existing.length,
+        options);
     }
 
     const documentRef = composer.ownerDocument || (typeof document !== "undefined" ? document : null);
     if (!documentRef?.createRange) return { success: false, code: "injection_failed" };
 
-    const view = documentRef.defaultView || (typeof window !== "undefined" ? window : null);
-    const selection = view?.getSelection?.();
-    let range;
-    try {
-      range = documentRef.createRange();
-      range.selectNodeContents(composer);
-      range.collapse(false);
-      selection?.removeAllRanges?.();
-      selection?.addRange?.(range);
-    } catch (_) {
+    const caret = placeCaretAtEnd(composer, documentRef);
+    if (!caret.success) {
       return { success: false, code: "injection_failed" };
     }
 
     const insertion = existing.trim() ? `\n\n${text}` : text;
-    let method = composer.id === "prompt-textarea" ? "prompt-textarea-contenteditable" : "contenteditable";
+    let method = composer.id === "prompt-textarea" ? "prompt-textarea-contenteditable" : "contenteditable-execCommand";
     let inserted = false;
     try {
       inserted = documentRef.execCommand?.("insertText", false, insertion) === true;
@@ -194,21 +380,19 @@
       inserted = false;
     }
 
-    if (containsInsertedText(composer, text)) {
-      inserted = true;
-    }
-
-    if (!containsInsertedText(composer, text)) {
+    const immediatePresentAfterCommand = containsInsertedText(composer, text);
+    inserted = inserted || immediatePresentAfterCommand;
+    if (!immediatePresentAfterCommand && caret.hasBlock) {
       try {
         const fallbackRange = documentRef.createRange();
-        fallbackRange.selectNodeContents(composer);
+        fallbackRange.selectNodeContents(caret.target);
         fallbackRange.collapse(false);
         const textNode = documentRef.createTextNode(insertion);
         fallbackRange.insertNode(textNode);
         fallbackRange.setStartAfter(textNode);
         fallbackRange.collapse(true);
-        selection?.removeAllRanges?.();
-        selection?.addRange?.(fallbackRange);
+        caret.selection?.removeAllRanges?.();
+        caret.selection?.addRange?.(fallbackRange);
         method = `${method}-range`;
         inserted = true;
       } catch (_) {
@@ -221,7 +405,14 @@
     }
 
     dispatchEvent(composer, "input", { inputType: "insertText", data: insertion });
-    return { success: true, method, appended: Boolean(existing.trim()) };
+    return verifyStableInjection(
+      root,
+      text,
+      method,
+      Boolean(existing.trim()),
+      composer,
+      existing.length,
+      options);
   }
 
   function createClipboardReader(permissionsApi, clipboardApi) {
