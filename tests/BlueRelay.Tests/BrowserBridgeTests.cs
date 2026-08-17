@@ -120,6 +120,138 @@ public sealed class BrowserBridgeTests
     }
 
     [TestMethod]
+    public async Task CompletingRoundPreservesTaskAndAllowsCompletedAndReviewingNextRounds()
+    {
+        var (bridge, projectService) = CreateBridge();
+        var project = (await projectService.TryCreateAsync("Round lifecycle", CreateDirectory("round-lifecycle"))).Project!;
+        var workstream = project.Workstreams[0];
+        var code = bridge.GeneratePairingCode().Code!;
+        Assert.IsTrue((await bridge.PairAsync(code, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
+
+        var firstCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nFirst round", "https://chatgpt.com/c/first", "first", "First tab"));
+        Assert.IsTrue(firstCapture.Success, firstCapture.Error);
+        Assert.IsTrue((await bridge.ConfirmTaskAsync(firstCapture.Value!.Id)).Success);
+        Assert.IsTrue((await bridge.SimulateResultAsync(firstCapture.Value.Id, "first result")).Success);
+        var queued = await bridge.QueueHandoffAsync(firstCapture.Value.Id);
+        Assert.IsTrue(queued.Success, queued.Error);
+
+        var completed = await bridge.CompleteTaskAsync(firstCapture.Value.Id);
+        Assert.IsTrue(completed.Success, completed.Error);
+        Assert.AreEqual(WorkflowState.Completed, workstream.CurrentState);
+        Assert.AreEqual(RelayTaskStatus.Completed, firstCapture.Value.Status);
+        Assert.AreEqual("# CODEX_TASK\nFirst round", firstCapture.Value.Prompt);
+        Assert.AreEqual("first result", firstCapture.Value.Result);
+        Assert.AreEqual(RelayCommandDeliveryStatus.None, firstCapture.Value.DeliveryStatus);
+        Assert.AreEqual(firstCapture.Value.Id.ToString("D"), workstream.CurrentTaskId);
+        Assert.AreEqual(workstream.Id, bridge.FindBindingDto(workstream.Id)!.WorkstreamId);
+        Assert.IsNull((await bridge.GetNextCommandAsync("installation-a", "tab-a")).Value);
+
+        var secondCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nSecond round", "https://chatgpt.com/c/second", "second", "First tab"));
+        Assert.IsTrue(secondCapture.Success, secondCapture.Error);
+        Assert.AreNotEqual(firstCapture.Value.Id, secondCapture.Value!.Id);
+        Assert.AreEqual(WorkflowState.ReadyForCodex, workstream.CurrentState);
+        Assert.AreEqual(secondCapture.Value.Id.ToString("D"), workstream.CurrentTaskId);
+        Assert.IsNull(secondCapture.Value.Result);
+
+        Assert.IsTrue((await bridge.ConfirmTaskAsync(secondCapture.Value.Id)).Success);
+        Assert.IsTrue((await bridge.SimulateResultAsync(secondCapture.Value.Id, "second result")).Success);
+        var secondHandoff = await bridge.QueueHandoffAsync(secondCapture.Value.Id);
+        Assert.IsTrue(secondHandoff.Success, secondHandoff.Error);
+        var secondDelivery = await bridge.GetNextCommandAsync("installation-a", "tab-a");
+        Assert.IsTrue(secondDelivery.Success, secondDelivery.Error);
+        Assert.IsTrue((await bridge.AcknowledgeHandoffAsync(secondDelivery.Value!.CommandId, true)).Success);
+        Assert.AreEqual(WorkflowState.ChatGPTReviewing, workstream.CurrentState);
+
+        var thirdCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nReview follow-up", "https://chatgpt.com/c/follow-up", "follow-up", "First tab"));
+        Assert.IsTrue(thirdCapture.Success, thirdCapture.Error);
+        Assert.AreEqual(WorkflowState.ReadyForCodex, workstream.CurrentState);
+        Assert.AreEqual(thirdCapture.Value!.Id.ToString("D"), workstream.CurrentTaskId);
+        Assert.IsNull(thirdCapture.Value.Result);
+        Assert.AreEqual("second result", secondCapture.Value.Result);
+    }
+
+    [TestMethod]
+    public async Task ClearingReviewingTaskReturnsToIdleKeepsBindingAndDoesNotAffectSibling()
+    {
+        var (bridge, projectService) = CreateBridge();
+        var project = (await projectService.TryCreateAsync("Clear lifecycle", CreateDirectory("clear-lifecycle"))).Project!;
+        var firstWorkstream = project.Workstreams[0];
+        var secondWorkstream = (await projectService.TryCreateWorkstreamAsync(project.Id, "Sibling")).Workstream!;
+        var code = bridge.GeneratePairingCode().Code!;
+        Assert.IsTrue((await bridge.PairAsync(code, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "tab-a", firstWorkstream.Id);
+        await RegisterAndBindAsync(bridge, "tab-b", secondWorkstream.Id);
+
+        var firstCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nReview me", "https://chatgpt.com/c/first", "first", "First tab"));
+        Assert.IsTrue(firstCapture.Success, firstCapture.Error);
+        Assert.IsTrue((await bridge.ConfirmTaskAsync(firstCapture.Value!.Id)).Success);
+        Assert.IsTrue((await bridge.SimulateResultAsync(firstCapture.Value.Id, "review result")).Success);
+        var handoff = await bridge.QueueHandoffAsync(firstCapture.Value.Id);
+        Assert.IsTrue(handoff.Success, handoff.Error);
+        var delivery = await bridge.GetNextCommandAsync("installation-a", "tab-a");
+        Assert.IsTrue(delivery.Success, delivery.Error);
+        Assert.IsTrue((await bridge.AcknowledgeHandoffAsync(delivery.Value!.CommandId, true)).Success);
+        Assert.AreEqual(WorkflowState.ChatGPTReviewing, firstWorkstream.CurrentState);
+
+        var siblingCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-b", "# CODEX_TASK\nSibling task", "https://chatgpt.com/c/sibling", "sibling", "Sibling tab"));
+        Assert.IsTrue(siblingCapture.Success, siblingCapture.Error);
+
+        var clear = await bridge.ClearCurrentTaskAsync(firstWorkstream.Id);
+        Assert.IsTrue(clear.Success, clear.Error);
+        Assert.AreEqual(WorkflowState.Idle, firstWorkstream.CurrentState);
+        Assert.IsNull(firstWorkstream.CurrentTaskId);
+        Assert.IsNull(bridge.FindCurrentTask(firstWorkstream.Id));
+        Assert.AreEqual("review result", firstCapture.Value.Result);
+        Assert.AreEqual(RelayCommandDeliveryStatus.None, firstCapture.Value.DeliveryStatus);
+        Assert.AreEqual(firstWorkstream.Id, bridge.FindBindingDto(firstWorkstream.Id)!.WorkstreamId);
+        Assert.AreEqual(WorkflowState.ReadyForCodex, secondWorkstream.CurrentState);
+        Assert.AreEqual(siblingCapture.Value!.Id.ToString("D"), secondWorkstream.CurrentTaskId);
+
+        var newCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nFresh task", "https://chatgpt.com/c/fresh", "fresh", "First tab"));
+        Assert.IsTrue(newCapture.Success, newCapture.Error);
+        Assert.AreEqual(WorkflowState.ReadyForCodex, firstWorkstream.CurrentState);
+        Assert.AreEqual(newCapture.Value!.Id.ToString("D"), firstWorkstream.CurrentTaskId);
+        Assert.IsNull(newCapture.Value.Result);
+        Assert.AreEqual(WorkflowState.ReadyForCodex, secondWorkstream.CurrentState);
+    }
+
+    [TestMethod]
+    public async Task ClearingCurrentTaskCancelsPendingDeliveryCommand()
+    {
+        var (bridge, projectService) = CreateBridge();
+        var project = (await projectService.TryCreateAsync("Clear pending", CreateDirectory("clear-pending"))).Project!;
+        var workstream = project.Workstreams[0];
+        var code = bridge.GeneratePairingCode().Code!;
+        Assert.IsTrue((await bridge.PairAsync(code, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
+
+        var capture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nPending task", "https://chatgpt.com/c/pending", "pending", "First tab"));
+        Assert.IsTrue(capture.Success, capture.Error);
+        Assert.IsTrue((await bridge.ConfirmTaskAsync(capture.Value!.Id)).Success);
+        Assert.IsTrue((await bridge.SimulateResultAsync(capture.Value.Id, "pending result")).Success);
+        Assert.IsTrue((await bridge.QueueHandoffAsync(capture.Value.Id)).Success);
+        var delivery = await bridge.GetNextCommandAsync("installation-a", "tab-a");
+        Assert.IsTrue(delivery.Success, delivery.Error);
+        Assert.AreEqual(RelayCommandDeliveryStatus.Delivering, capture.Value.DeliveryStatus);
+
+        var clear = await bridge.ClearCurrentTaskAsync(workstream.Id);
+        Assert.IsTrue(clear.Success, clear.Error);
+        Assert.IsNull((await bridge.GetNextCommandAsync("installation-a", "tab-a")).Value);
+        Assert.AreEqual(WorkflowState.Idle, workstream.CurrentState);
+        Assert.IsNull(workstream.CurrentTaskId);
+        Assert.AreEqual(RelayCommandDeliveryStatus.None, capture.Value.DeliveryStatus);
+        Assert.IsNull(capture.Value.DeliveryErrorCode);
+    }
+
+    [TestMethod]
     public async Task UnauthenticatedBridgeRequestsAreRejectedAndServerStops()
     {
         var (bridge, _) = CreateBridge();

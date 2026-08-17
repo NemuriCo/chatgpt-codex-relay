@@ -91,6 +91,12 @@ public sealed class UiTextSet
     public required string SendToCodex { get; init; }
     public required string SendToChatGPT { get; init; }
     public required string RetrySendToChatGPT { get; init; }
+    public required string CompleteCurrentRound { get; init; }
+    public required string ClearCurrentTask { get; init; }
+    public required string ClearCurrentTaskTitle { get; init; }
+    public required string ClearCurrentTaskMessage { get; init; }
+    public required string CurrentRoundCompleted { get; init; }
+    public required string CurrentTaskCleared { get; init; }
     public required string CodexSimulationStarted { get; init; }
     public required string HandoffQueued { get; init; }
     public required string HandoffFailed { get; init; }
@@ -222,6 +228,12 @@ public static class LocalizationService
         SendToCodex = "Confirm send",
         SendToChatGPT = "Send back to ChatGPT",
         RetrySendToChatGPT = "Retry sending to ChatGPT",
+        CompleteCurrentRound = "Complete current round",
+        ClearCurrentTask = "Clear current task",
+        ClearCurrentTaskTitle = "Clear current task?",
+        ClearCurrentTaskMessage = "Clear current task?\n\nThis will clear the current Prompt, Result, and unfinished delivery state, then return this Workstream to waiting for a new task.\n\nIt will not delete the Project, Workstream, or ChatGPT tab binding.",
+        CurrentRoundCompleted = "Current round completed.",
+        CurrentTaskCleared = "Current task cleared. The Workstream is ready for a new task.",
         CodexSimulationStarted = "Simulation started. Use ⋯ → Simulate Codex result.",
         HandoffQueued = "Sending result to the original ChatGPT tab...",
         HandoffFailed = "Could not fill ChatGPT. You can retry; the result is preserved.",
@@ -350,6 +362,12 @@ public static class LocalizationService
         SendToCodex = "确认发送",
         SendToChatGPT = "发回 ChatGPT",
         RetrySendToChatGPT = "重试返回 ChatGPT",
+        CompleteCurrentRound = "结束本轮",
+        ClearCurrentTask = "清空当前任务",
+        ClearCurrentTaskTitle = "清空当前任务？",
+        ClearCurrentTaskMessage = "清空当前任务？\n\n将清除当前 Prompt、Result 和未完成的投递状态，并让该工作流恢复为等待新任务。\n\n不会删除项目、工作流或 ChatGPT 标签页绑定。",
+        CurrentRoundCompleted = "本轮已结束。",
+        CurrentTaskCleared = "当前任务已清空，工作流正在等待新任务。",
         CodexSimulationStarted = "已进入模拟运行，请使用 ⋯ → 模拟 Codex 返回。",
         HandoffQueued = "正在发送到原 ChatGPT 标签页…",
         HandoffFailed = "未能填入 ChatGPT，可重试。结果仍已保留。",

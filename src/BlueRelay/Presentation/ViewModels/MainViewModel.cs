@@ -34,6 +34,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _selectWorkstreamCommand;
     private readonly RelayCommand _confirmTaskCommand;
     private readonly RelayCommand _handoffResultCommand;
+    private readonly RelayCommand _completeCurrentRoundCommand;
+    private readonly RelayCommand _clearCurrentTaskCommand;
     private readonly RelayCommand _openDebugCommand;
     private readonly RelayCommand _openSimulatedResultCommand;
     private readonly RelayCommand _simulateResultCommand;
@@ -114,6 +116,8 @@ public sealed class MainViewModel : ObservableObject
         _selectWorkstreamCommand = new RelayCommand(SelectWorkstream);
         _confirmTaskCommand = new RelayCommand(ConfirmTaskAsync, CanRunTaskAction);
         _handoffResultCommand = new RelayCommand(HandoffResultAsync, CanHandoffResult);
+        _completeCurrentRoundCommand = new RelayCommand(CompleteCurrentRoundAsync, CanCompleteCurrentRound);
+        _clearCurrentTaskCommand = new RelayCommand(ClearCurrentTaskAsync, CanSelectWorkstream);
         _openDebugCommand = new RelayCommand(OpenDebug, CanSelectWorkstream);
         _openSimulatedResultCommand = new RelayCommand(OpenSimulatedResult, CanSimulateResult);
         _simulateResultCommand = new RelayCommand(SimulateResultAsync, () => IsSimulatingResult && !string.IsNullOrWhiteSpace(SimulatedResultText));
@@ -202,6 +206,10 @@ public sealed class MainViewModel : ObservableObject
     public ICommand ConfirmTaskCommand => _confirmTaskCommand;
 
     public ICommand HandoffResultCommand => _handoffResultCommand;
+
+    public ICommand CompleteCurrentRoundCommand => _completeCurrentRoundCommand;
+
+    public ICommand ClearCurrentTaskCommand => _clearCurrentTaskCommand;
 
     public ICommand OpenDebugCommand => _openDebugCommand;
 
@@ -1176,6 +1184,13 @@ public sealed class MainViewModel : ObservableObject
         return parameter is ProjectListItemViewModel item && item.CanSendToChatGPT;
     }
 
+    private bool CanCompleteCurrentRound(object? parameter)
+    {
+        return parameter is ProjectListItemViewModel item
+            && item.HasCurrentTask
+            && item.CurrentState != WorkflowState.Completed;
+    }
+
     private bool CanSimulateResult(object? parameter)
     {
         return parameter is ProjectListItemViewModel item
@@ -1216,6 +1231,53 @@ public sealed class MainViewModel : ObservableObject
         }
 
         SetStatus(Ui.HandoffQueued);
+    }
+
+    private async Task CompleteCurrentRoundAsync(object? parameter)
+    {
+        if (parameter is not ProjectListItemViewModel item || item.CurrentTask is not { } task)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.CompleteTaskAsync(task.Id);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        RefreshData(item.ProjectId, item.Id);
+        SetStatus(Ui.CurrentRoundCompleted);
+    }
+
+    private async Task ClearCurrentTaskAsync(object? parameter)
+    {
+        var item = parameter as ProjectListItemViewModel ?? SelectedWorkstream;
+        if (item is null)
+        {
+            return;
+        }
+
+        var confirmed = await _dialogService.ConfirmAsync(
+            Ui.ClearCurrentTaskTitle,
+            Ui.ClearCurrentTaskMessage);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.ClearCurrentTaskAsync(item.Id);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        CloseTaskDetail();
+        CloseDebug();
+        RefreshData(item.ProjectId, item.Id);
+        SetStatus(Ui.CurrentTaskCleared);
     }
 
     private void OpenDebug(object? parameter)
@@ -1427,6 +1489,8 @@ public sealed class MainViewModel : ObservableObject
         _cancelWorkstreamEditCommand.RaiseCanExecuteChanged();
         _confirmTaskCommand.RaiseCanExecuteChanged();
         _handoffResultCommand.RaiseCanExecuteChanged();
+        _completeCurrentRoundCommand.RaiseCanExecuteChanged();
+        _clearCurrentTaskCommand.RaiseCanExecuteChanged();
         _openDebugCommand.RaiseCanExecuteChanged();
         _openSimulatedResultCommand.RaiseCanExecuteChanged();
         _simulateResultCommand.RaiseCanExecuteChanged();

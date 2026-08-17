@@ -20,6 +20,14 @@ public sealed class BrowserBridgeService
     private string? _pairingCode;
     private DateTimeOffset? _pairingCodeExpiresAt;
 
+    private sealed record CancelledHandoff(
+        string Key,
+        HandoffCommand Command,
+        RelayTask? Task,
+        RelayCommandDeliveryStatus? DeliveryStatus,
+        string? DeliveryErrorCode,
+        DateTimeOffset? UpdatedAt);
+
     public BrowserBridgeService(ApplicationState state, ProjectService projectService)
     {
         _state = state;
@@ -305,7 +313,8 @@ public sealed class BrowserBridgeService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var changed = false;
+            var cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstreamId);
+            var changed = cancelledHandoffs.Count > 0;
             foreach (var binding in _state.BrowserBridge.Bindings.Where(item => item.WorkstreamId == workstreamId))
             {
                 binding.WorkstreamId = null;
@@ -320,6 +329,7 @@ public sealed class BrowserBridgeService
             var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
             if (!saveResult.Success)
             {
+                RestoreCancelledHandoffs(cancelledHandoffs);
                 return Failure("persistence_failed", saveResult.Error);
             }
 
@@ -357,6 +367,12 @@ public sealed class BrowserBridgeService
                 return Failure<RelayTask>("workstream_not_found", "The bound Workstream no longer exists.");
             }
 
+            var cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstream.Id);
+            var previousTask = FindCurrentTask(workstream);
+            var previousTaskDeliveryStatus = previousTask?.DeliveryStatus;
+            var previousTaskDeliveryErrorCode = previousTask?.DeliveryErrorCode;
+            var previousTaskUpdatedAt = previousTask?.UpdatedAt;
+
             var task = new RelayTask
             {
                 WorkstreamId = workstream.Id,
@@ -382,6 +398,14 @@ public sealed class BrowserBridgeService
             {
                 workstream.CurrentTaskId = previousTaskId;
                 _state.BrowserBridge.Tasks.Remove(task);
+                if (previousTask is not null)
+                {
+                    previousTask.DeliveryStatus = previousTaskDeliveryStatus!.Value;
+                    previousTask.DeliveryErrorCode = previousTaskDeliveryErrorCode;
+                    previousTask.UpdatedAt = previousTaskUpdatedAt!.Value;
+                }
+
+                RestoreCancelledHandoffs(cancelledHandoffs);
                 return Failure<RelayTask>("state_transition_failed", stateResult.Error);
             }
 
@@ -424,6 +448,11 @@ public sealed class BrowserBridgeService
             if (workstream is null)
             {
                 return Failure<RelayTask>("workstream_not_found", "The task Workstream no longer exists.");
+            }
+
+            if (!IsCurrentTask(workstream, task))
+            {
+                return Failure<RelayTask>("task_not_current", "Only the current Workstream task can receive a result.");
             }
 
             var previousResult = task.Result;
@@ -470,6 +499,17 @@ public sealed class BrowserBridgeService
             if (task is null)
             {
                 return Failure<HandoffCommand>("task_not_found", "The task no longer exists.");
+            }
+
+            var workstream = _projectService.FindWorkstreamForId(task.WorkstreamId);
+            if (workstream is null || !IsCurrentTask(workstream, task))
+            {
+                return Failure<HandoffCommand>("task_not_current", "Only the current Workstream task can be sent to ChatGPT.");
+            }
+
+            if (workstream.CurrentState != WorkflowState.ReadyForChatGPT)
+            {
+                return Failure<HandoffCommand>("task_not_ready", "Only a result ready for ChatGPT can be sent back.");
             }
 
             if (string.IsNullOrWhiteSpace(task.Result))
@@ -553,6 +593,16 @@ public sealed class BrowserBridgeService
                 return new BridgeOperationResult<HandoffCommand>(true);
             }
 
+            var commandTask = FindTask(command.TaskId);
+            var commandWorkstream = commandTask is null
+                ? null
+                : _projectService.FindWorkstreamForId(commandTask.WorkstreamId);
+            if (commandTask is null || commandWorkstream is null || !IsCurrentTask(commandWorkstream, commandTask))
+            {
+                _handoffCommands.Remove(binding.TabKey);
+                return new BridgeOperationResult<HandoffCommand>(true);
+            }
+
             var now = DateTimeOffset.UtcNow;
             if (command.DeliveryStatus == RelayCommandDeliveryStatus.Delivering)
             {
@@ -562,16 +612,12 @@ public sealed class BrowserBridgeService
                     return new BridgeOperationResult<HandoffCommand>(true);
                 }
 
-                var timedOutTask = FindTask(command.TaskId);
                 _handoffCommands.Remove(binding.TabKey);
-                if (timedOutTask is not null)
-                {
-                    timedOutTask.DeliveryStatus = RelayCommandDeliveryStatus.Failed;
-                    timedOutTask.DeliveryErrorCode = "delivery_timeout";
-                    timedOutTask.UpdatedAt = now;
-                    await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
-                    Changed?.Invoke(this, EventArgs.Empty);
-                }
+                commandTask.DeliveryStatus = RelayCommandDeliveryStatus.Failed;
+                commandTask.DeliveryErrorCode = "delivery_timeout";
+                commandTask.UpdatedAt = now;
+                await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+                Changed?.Invoke(this, EventArgs.Empty);
 
                 return new BridgeOperationResult<HandoffCommand>(true);
             }
@@ -583,15 +629,11 @@ public sealed class BrowserBridgeService
                 LastAttemptAt = now
             };
             _handoffCommands[binding.TabKey] = deliveringCommand;
-            var task = FindTask(command.TaskId);
-            if (task is not null)
-            {
-                task.DeliveryStatus = RelayCommandDeliveryStatus.Delivering;
-                task.DeliveryErrorCode = null;
-                task.UpdatedAt = now;
-                await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
-                Changed?.Invoke(this, EventArgs.Empty);
-            }
+            commandTask.DeliveryStatus = RelayCommandDeliveryStatus.Delivering;
+            commandTask.DeliveryErrorCode = null;
+            commandTask.UpdatedAt = now;
+            await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+            Changed?.Invoke(this, EventArgs.Empty);
 
             return new BridgeOperationResult<HandoffCommand>(true, deliveringCommand);
         }
@@ -621,6 +663,12 @@ public sealed class BrowserBridgeService
             if (task is null || workstream is null)
             {
                 return Failure<RelayTask>("task_not_found", "The task no longer exists.");
+            }
+
+            if (!IsCurrentTask(workstream, task))
+            {
+                _handoffCommands.Remove(commandEntry.Key);
+                return Failure<RelayTask>("task_not_current", "The handoff belongs to an older Workstream task.");
             }
 
             if (!success)
@@ -674,7 +722,113 @@ public sealed class BrowserBridgeService
         Guid taskId,
         CancellationToken cancellationToken = default)
     {
-        return await ChangeTaskStateAsync(taskId, WorkflowState.Completed, RelayTaskStatus.Completed, cancellationToken).ConfigureAwait(false);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var task = FindTask(taskId);
+            var workstream = task is null ? null : _projectService.FindWorkstreamForId(task.WorkstreamId);
+            if (task is null || workstream is null)
+            {
+                return Failure<RelayTask>("task_not_found", "The task or Workstream no longer exists.");
+            }
+
+            if (!IsCurrentTask(workstream, task))
+            {
+                return Failure<RelayTask>("task_not_current", "Only the current Workstream task can be completed.");
+            }
+
+            var cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstream.Id);
+            var previousStatus = task.Status;
+            var previousDeliveryStatus = task.DeliveryStatus;
+            var previousDeliveryErrorCode = task.DeliveryErrorCode;
+            var previousUpdatedAt = task.UpdatedAt;
+            task.Status = RelayTaskStatus.Completed;
+            if (cancelledHandoffs.Count > 0 || task.DeliveryStatus is RelayCommandDeliveryStatus.Queued or RelayCommandDeliveryStatus.Delivering)
+            {
+                task.DeliveryStatus = RelayCommandDeliveryStatus.None;
+                task.DeliveryErrorCode = null;
+            }
+
+            task.UpdatedAt = DateTimeOffset.UtcNow;
+            var stateResult = await _projectService.TryChangeStateAsync(
+                workstream.ProjectId,
+                workstream.Id,
+                WorkflowState.Completed,
+                manualOverride: true,
+                cancellationToken).ConfigureAwait(false);
+            if (!stateResult.Success)
+            {
+                task.Status = previousStatus;
+                task.DeliveryStatus = previousDeliveryStatus;
+                task.DeliveryErrorCode = previousDeliveryErrorCode;
+                task.UpdatedAt = previousUpdatedAt;
+                RestoreCancelledHandoffs(cancelledHandoffs);
+                return Failure<RelayTask>("state_transition_failed", stateResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
+            return new BridgeOperationResult<RelayTask>(true, task);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<BridgeOperationResult> ClearCurrentTaskAsync(
+        Guid workstreamId,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var workstream = _projectService.FindWorkstreamForId(workstreamId);
+            if (workstream is null)
+            {
+                return Failure("workstream_not_found", "The selected Workstream no longer exists.");
+            }
+
+            var currentTask = FindCurrentTask(workstream);
+            var previousTaskId = workstream.CurrentTaskId;
+            var previousTaskDeliveryStatus = currentTask?.DeliveryStatus;
+            var previousTaskDeliveryErrorCode = currentTask?.DeliveryErrorCode;
+            var previousTaskUpdatedAt = currentTask?.UpdatedAt;
+            var cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstream.Id);
+            workstream.CurrentTaskId = null;
+            if (currentTask is not null)
+            {
+                currentTask.DeliveryStatus = RelayCommandDeliveryStatus.None;
+                currentTask.DeliveryErrorCode = null;
+                currentTask.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+
+            var stateResult = await _projectService.TryChangeStateAsync(
+                workstream.ProjectId,
+                workstream.Id,
+                WorkflowState.Idle,
+                manualOverride: true,
+                cancellationToken).ConfigureAwait(false);
+            if (!stateResult.Success)
+            {
+                workstream.CurrentTaskId = previousTaskId;
+                if (currentTask is not null)
+                {
+                    currentTask.DeliveryStatus = previousTaskDeliveryStatus!.Value;
+                    currentTask.DeliveryErrorCode = previousTaskDeliveryErrorCode;
+                    currentTask.UpdatedAt = previousTaskUpdatedAt!.Value;
+                }
+
+                RestoreCancelledHandoffs(cancelledHandoffs);
+                return Failure("state_transition_failed", stateResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
+            return new BridgeOperationResult(true);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public IReadOnlyList<BridgeWorkstreamDto> ListWorkstreams()
@@ -753,6 +907,11 @@ public sealed class BrowserBridgeService
                 return Failure<RelayTask>("task_not_found", "The task or Workstream no longer exists.");
             }
 
+            if (!IsCurrentTask(workstream, task))
+            {
+                return Failure<RelayTask>("task_not_current", "Only the current Workstream task can change state.");
+            }
+
             var previousStatus = task.Status;
             task.Status = targetStatus;
             task.UpdatedAt = DateTimeOffset.UtcNow;
@@ -789,6 +948,57 @@ public sealed class BrowserBridgeService
         return Guid.TryParse(workstream.CurrentTaskId, out var taskId)
             ? FindTask(taskId)
             : null;
+    }
+
+    private static bool IsCurrentTask(Workstream workstream, RelayTask task)
+    {
+        return Guid.TryParse(workstream.CurrentTaskId, out var currentTaskId)
+            && currentTaskId == task.Id;
+    }
+
+    private List<CancelledHandoff> CancelHandoffCommandsForWorkstream(Guid workstreamId)
+    {
+        var cancelled = _handoffCommands
+            .Where(item => item.Value.WorkstreamId == workstreamId)
+            .Select(item =>
+            {
+                var task = FindTask(item.Value.TaskId);
+                return new CancelledHandoff(
+                    item.Key,
+                    item.Value,
+                    task,
+                    task?.DeliveryStatus,
+                    task?.DeliveryErrorCode,
+                    task?.UpdatedAt);
+            })
+            .ToList();
+
+        foreach (var item in cancelled)
+        {
+            _handoffCommands.Remove(item.Key);
+            if (item.Task is not null && item.Task.DeliveryStatus is RelayCommandDeliveryStatus.Queued or RelayCommandDeliveryStatus.Delivering)
+            {
+                item.Task.DeliveryStatus = RelayCommandDeliveryStatus.None;
+                item.Task.DeliveryErrorCode = null;
+                item.Task.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }
+
+        return cancelled;
+    }
+
+    private void RestoreCancelledHandoffs(IEnumerable<CancelledHandoff> cancelled)
+    {
+        foreach (var item in cancelled)
+        {
+            _handoffCommands[item.Key] = item.Command;
+            if (item.Task is not null && item.DeliveryStatus.HasValue && item.UpdatedAt.HasValue)
+            {
+                item.Task.DeliveryStatus = item.DeliveryStatus.Value;
+                item.Task.DeliveryErrorCode = item.DeliveryErrorCode;
+                item.Task.UpdatedAt = item.UpdatedAt.Value;
+            }
+        }
     }
 
     private static bool IsConnected(BrowserBinding binding)
