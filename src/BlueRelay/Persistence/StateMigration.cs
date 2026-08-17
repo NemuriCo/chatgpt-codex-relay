@@ -4,7 +4,7 @@ namespace BlueRelay.Persistence;
 
 public static class StateMigration
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public static bool Migrate(ApplicationState state)
     {
@@ -31,6 +31,49 @@ public static class StateMigration
                 {
                     workstream.CodexThreadId = workstream.CodexSessionId;
                     changed = true;
+                }
+
+                var binding = state.BrowserBridge.Bindings.FirstOrDefault(item => item.WorkstreamId == workstream.Id);
+                if (binding is not null)
+                {
+                    if (string.IsNullOrWhiteSpace(workstream.BrowserInstallationId))
+                    {
+                        workstream.BrowserInstallationId = binding.InstallationId;
+                        changed = true;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(workstream.ChatGPTTabId))
+                    {
+                        workstream.ChatGPTTabId = binding.TabId;
+                        changed = true;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(workstream.ChatGPTConversationId) &&
+                        !string.IsNullOrWhiteSpace(binding.ChatGPTConversationId))
+                    {
+                        workstream.ChatGPTConversationId = binding.ChatGPTConversationId;
+                        changed = true;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(workstream.ChatGPTUrl) && !string.IsNullOrWhiteSpace(binding.ChatGPTUrl))
+                    {
+                        workstream.ChatGPTUrl = binding.ChatGPTUrl;
+                        changed = true;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(workstream.ChatGPTTitle) && !string.IsNullOrWhiteSpace(binding.PageTitle))
+                    {
+                        workstream.ChatGPTTitle = binding.PageTitle;
+                        changed = true;
+                    }
+
+                    var mismatch = !string.IsNullOrWhiteSpace(workstream.ChatGPTConversationId) &&
+                                   !string.Equals(workstream.ChatGPTConversationId, binding.ChatGPTConversationId, StringComparison.Ordinal);
+                    if (binding.ConversationMismatch != mismatch)
+                    {
+                        binding.ConversationMismatch = mismatch;
+                        changed = true;
+                    }
                 }
             }
 

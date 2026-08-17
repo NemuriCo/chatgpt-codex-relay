@@ -18,6 +18,12 @@ public sealed class BrowserBinding
 
     public Guid? WorkstreamId { get; set; }
 
+    /// <summary>
+    /// The endpoint currently reports a different or unavailable conversation
+    /// than the durable Workstream pairing. It must not capture or receive results.
+    /// </summary>
+    public bool ConversationMismatch { get; set; }
+
     public DateTimeOffset LastSeenAt { get; set; } = DateTimeOffset.UtcNow;
 
     public bool Connected { get; set; }

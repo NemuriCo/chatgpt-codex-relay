@@ -133,6 +133,38 @@ public sealed class ProjectListItemViewModel : ObservableObject
         ? binding.Connected ? _text.BrowserConnected : _text.BrowserDisconnected
         : _text.BrowserNotBound;
 
+    private BrowserBindingDto? Binding => _browserBridge?.FindBindingDto(Workstream.Id);
+
+    public string ChatGPTPairingText => string.IsNullOrWhiteSpace(Workstream.ChatGPTTitle)
+        ? _text.ChatGPTNotBound
+        : Workstream.ChatGPTTitle;
+
+    public string ChatGPTPairingStatus => Binding?.ConversationMismatch == true
+        ? _text.ChatGPTConversationChanged
+        : Binding?.Connected == true ? _text.BrowserConnected : _text.BrowserDisconnected;
+
+    public string ChatGPTPairingTooltip => string.Join(Environment.NewLine, new[]
+    {
+        Workstream.ChatGPTTitle,
+        Workstream.ChatGPTUrl,
+        Workstream.ChatGPTConversationId is { Length: > 0 } conversation ? $"Conversation: {conversation}" : null,
+        Workstream.ChatGPTTabId is { Length: > 0 } tab ? $"Tab: {tab}" : null
+    }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    public string CodexPairingText => string.IsNullOrWhiteSpace(Workstream.CodexThreadId)
+        ? _text.CodexNotBound
+        : ShortIdentity(Workstream.CodexThreadId);
+
+    public string CodexPairingStatus => Workstream.CodexErrorCode == "codex_thread_conflict"
+        ? _text.CodexConflict
+        : string.IsNullOrWhiteSpace(Workstream.CodexThreadId) ? _text.CodexNotBound : _text.CodexBound;
+
+    public string CodexThreadIdTooltip => Workstream.CodexThreadId ?? _text.CodexNotBound;
+
+    public bool HasCodexThreadConflict => Workstream.CodexErrorCode == "codex_thread_conflict";
+
+    public string CodexIssueText => Workstream.CodexError ?? string.Empty;
+
     public MediaBrush BrowserConnectionBrush => _browserBridge?.FindBindingDto(Workstream.Id)?.Connected == true
         ? System.Windows.Media.Brushes.LightGreen
         : System.Windows.Media.Brushes.SlateGray;
@@ -230,6 +262,15 @@ public sealed class ProjectListItemViewModel : ObservableObject
         OnPropertyChanged(nameof(HasDeliveryError));
         OnPropertyChanged(nameof(SendToChatGPTLabel));
         OnPropertyChanged(nameof(BrowserConnectionText));
+        OnPropertyChanged(nameof(Binding));
+        OnPropertyChanged(nameof(ChatGPTPairingText));
+        OnPropertyChanged(nameof(ChatGPTPairingStatus));
+        OnPropertyChanged(nameof(ChatGPTPairingTooltip));
+        OnPropertyChanged(nameof(CodexPairingText));
+        OnPropertyChanged(nameof(CodexPairingStatus));
+        OnPropertyChanged(nameof(CodexThreadIdTooltip));
+        OnPropertyChanged(nameof(HasCodexThreadConflict));
+        OnPropertyChanged(nameof(CodexIssueText));
         OnPropertyChanged(nameof(BrowserConnectionBrush));
         OnPropertyChanged(nameof(CurrentState));
         OnPropertyChanged(nameof(StatusLabel));
@@ -249,5 +290,10 @@ public sealed class ProjectListItemViewModel : ObservableObject
             : length < 1024 * 1024
                 ? $"{length / 1024d:0.#} KB"
                 : $"{length / 1024d / 1024d:0.#} MB";
+    }
+
+    private static string ShortIdentity(string value)
+    {
+        return value.Length <= 16 ? value : $"{value[..8]}…{value[^6..]}";
     }
 }

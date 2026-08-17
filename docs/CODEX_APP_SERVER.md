@@ -13,6 +13,19 @@ Phase 3 connects BlueRelay to the local Codex App Server over its stdio JSON-RPC
 - A normal turn stores the final agent message in result.md and moves the Workstream to ReadyForChatGPT. Process exit, protocol failure, or a missing result preserves the task and moves the Workstream to an actionable error state.
 - Cancellation uses turn/interrupt; it does not kill the Codex process. The UI exposes a separate reset-thread action that clears only the Workstream's saved thread mapping.
 
+## Explicit session pairing
+
+Each Workstream keeps a durable pairing for both sides of the relay:
+
+- ChatGPT: browser installation id, tab id, conversation id, current URL, and page title.
+- Codex: the saved Codex thread id.
+
+The browser endpoint is runtime state, while the Workstream fields are the durable identity. A ChatGPT SPA navigation that reports a different conversation marks the binding as mismatched and pauses capture and result delivery. The extension must explicitly rebind the current conversation; a normal bind request cannot silently replace an existing pairing. A stale disconnected tab may be replaced by another tab for the same conversation.
+
+Codex thread attachment is tracked per app-server process generation. The first turn in a generation starts or resumes the saved thread; later turns reuse the attached thread without another `thread/resume`. A new process generation resumes the saved thread once. If the App Server reports that another process owns the active writer, BlueRelay keeps the current task and thread, moves the Workstream to NeedsAttention, and offers retrying the original session or starting a new Codex session. Starting a new session clears only the Codex binding; project, task, ChatGPT pairing, browser endpoint, and user note remain intact.
+
+Routing diagnostics contain only Workstream and shortened endpoint/thread identities plus the routing decision. Prompt and result bodies are never included.
+
 ## Approval boundary
 
 The bridge surfaces the current App Server request methods:

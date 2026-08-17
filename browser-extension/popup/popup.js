@@ -3,6 +3,7 @@
   const $ = (id) => document.getElementById(id);
   let activeTab = null;
   let workstreams = [];
+  let rebindRequired = false;
   const clipboardPermissions = {
     contains: (...args) => chrome.permissions.contains(...args),
     request: (...args) => chrome.permissions.request(...args)
@@ -56,6 +57,8 @@
   async function render() {
     localize();
     ["unsupported", "offline", "pairing", "connected"].forEach((id) => show(id, false));
+    show("rebindButton", false);
+    rebindRequired = false;
     const health = await call({ type: "POPUP_HEALTH" });
     if (!health || !health.success) {
       show("offline", true);
@@ -101,7 +104,14 @@
     const bound = workstreams.find((item) => item.binding && item.binding.tabId === String(activeTab.id));
     if (bound) {
       select.value = bound.workstreamId;
-      $("bindStatus").textContent = bound.binding.connected ? text("tabConnected", "ChatGPT tab connected") : text("tabDisconnected", "ChatGPT tab disconnected");
+      const binding = bound.binding;
+      $("bindStatus").textContent = binding.conversationMismatch
+        ? text("conversationChanged", "This tab is on a different ChatGPT conversation. Rebind it explicitly to continue.")
+        : binding.connected ? text("tabConnected", "ChatGPT tab connected") : text("tabDisconnected", "ChatGPT tab disconnected");
+      if (binding.conversationMismatch) {
+        rebindRequired = true;
+        show("rebindButton", true);
+      }
       $("workflowStatus").textContent = bound.currentState;
     }
     show("connected", true);
@@ -118,8 +128,20 @@
 
   $("bindButton").addEventListener("click", async () => {
     if (!activeTab) return;
-    const response = await call({ type: "POPUP_BIND", tabId: activeTab.id, workstreamId: $("workstreamSelect").value });
+    const response = await call({ type: "POPUP_BIND", tabId: activeTab.id, workstreamId: $("workstreamSelect").value, rebind: false });
     $("bindStatus").textContent = response && response.success ? text("tabBound", "ChatGPT tab bound") : (response?.message || text("bindingFailed", "Binding failed."));
+    if (!response?.success && ["conversation_mismatch", "workstream_already_bound", "tab_already_bound"].includes(response?.code)) {
+      rebindRequired = true;
+      show("rebindButton", true);
+      $("bindStatus").textContent = text("explicitRebindRequired", "This pairing is already in use. Rebind explicitly to use the current tab and conversation.");
+    }
+    if (response && response.success) await render();
+  });
+
+  $("rebindButton").addEventListener("click", async () => {
+    if (!activeTab || !rebindRequired) return;
+    const response = await call({ type: "POPUP_BIND", tabId: activeTab.id, workstreamId: $("workstreamSelect").value, rebind: true });
+    $("bindStatus").textContent = response && response.success ? text("tabRebound", "Current ChatGPT conversation rebound") : (response?.message || text("bindingFailed", "Binding failed."));
     if (response && response.success) await render();
   });
 

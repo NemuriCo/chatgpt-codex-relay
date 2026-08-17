@@ -11,7 +11,7 @@ public sealed record CodexExecutableInfo(
     public bool Found => !string.IsNullOrWhiteSpace(Path);
 }
 
-public sealed class CodexExecutableLocator
+public sealed class CodexExecutableLocator : ICodexExecutableLocator
 {
     private readonly object _cacheGate = new();
     private string? _cachedConfiguredPath;

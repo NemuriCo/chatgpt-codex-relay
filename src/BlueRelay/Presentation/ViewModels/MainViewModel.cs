@@ -37,6 +37,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _confirmTaskCommand;
     private readonly RelayCommand _cancelCodexTaskCommand;
     private readonly RelayCommand _resetCodexThreadCommand;
+    private readonly RelayCommand _newCodexSessionAndRetryCommand;
+    private readonly RelayCommand _copyCodexThreadIdCommand;
     private readonly RelayCommand _handoffResultCommand;
     private readonly RelayCommand _completeCurrentRoundCommand;
     private readonly RelayCommand _clearCurrentTaskCommand;
@@ -123,6 +125,8 @@ public sealed class MainViewModel : ObservableObject
         _confirmTaskCommand = new RelayCommand(ConfirmTaskAsync, CanRunTaskAction);
         _cancelCodexTaskCommand = new RelayCommand(CancelCodexTaskAsync, CanCancelCodexTask);
         _resetCodexThreadCommand = new RelayCommand(ResetCodexThreadAsync, CanSelectWorkstream);
+        _newCodexSessionAndRetryCommand = new RelayCommand(NewCodexSessionAndRetryAsync, CanSelectWorkstream);
+        _copyCodexThreadIdCommand = new RelayCommand(CopyCodexThreadId, CanCopyCodexThreadId);
         _handoffResultCommand = new RelayCommand(HandoffResultAsync, CanHandoffResult);
         _completeCurrentRoundCommand = new RelayCommand(CompleteCurrentRoundAsync, CanCompleteCurrentRound);
         _clearCurrentTaskCommand = new RelayCommand(ClearCurrentTaskAsync, CanSelectWorkstream);
@@ -223,6 +227,10 @@ public sealed class MainViewModel : ObservableObject
     public ICommand CancelCodexTaskCommand => _cancelCodexTaskCommand;
 
     public ICommand ResetCodexThreadCommand => _resetCodexThreadCommand;
+
+    public ICommand NewCodexSessionAndRetryCommand => _newCodexSessionAndRetryCommand;
+
+    public ICommand CopyCodexThreadIdCommand => _copyCodexThreadIdCommand;
 
     public CodexBridgeStatus CodexStatus => _codexBridge?.Status ?? CodexBridgeStatus.Disconnected;
 
@@ -1318,6 +1326,11 @@ public sealed class MainViewModel : ObservableObject
         return parameter is ProjectListItemViewModel || SelectedWorkstream is not null;
     }
 
+    private bool CanCopyCodexThreadId(object? parameter)
+    {
+        return (parameter as ProjectListItemViewModel ?? SelectedWorkstream)?.Workstream.CodexThreadId is { Length: > 0 };
+    }
+
     private bool CanRunTaskAction(object? parameter)
     {
         return parameter is ProjectListItemViewModel item && item.CanSendToCodex;
@@ -1407,6 +1420,51 @@ public sealed class MainViewModel : ObservableObject
 
         RefreshData(item.ProjectId, item.Id);
         SetStatus(Ui.CodexThreadReset);
+    }
+
+    private async Task NewCodexSessionAndRetryAsync(object? parameter)
+    {
+        var item = parameter as ProjectListItemViewModel ?? SelectedWorkstream;
+        if (item is null)
+        {
+            return;
+        }
+
+        var confirmed = await _dialogService.ConfirmAsync(Ui.NewCodexSessionAndRetryTitle, Ui.NewCodexSessionAndRetryMessage);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var result = await _browserBridge.NewCodexSessionAndRetryAsync(item.Id, item.UserNote);
+        if (!result.Success)
+        {
+            SetStatus(result.Error, isError: true);
+            return;
+        }
+
+        RefreshData(item.ProjectId, item.Id);
+        SetStatus(Ui.CodexSessionRetried);
+    }
+
+    private void CopyCodexThreadId(object? parameter)
+    {
+        var item = parameter as ProjectListItemViewModel ?? SelectedWorkstream;
+        var threadId = item?.Workstream.CodexThreadId;
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            return;
+        }
+
+        try
+        {
+            System.Windows.Clipboard.SetText(threadId);
+            SetStatus(Ui.CodexThreadIdCopied);
+        }
+        catch (Exception exception)
+        {
+            SetStatus(exception.Message, isError: true);
+        }
     }
 
     private async Task HandoffResultAsync(object? parameter)
@@ -1683,6 +1741,8 @@ public sealed class MainViewModel : ObservableObject
         _confirmTaskCommand.RaiseCanExecuteChanged();
         _cancelCodexTaskCommand.RaiseCanExecuteChanged();
         _resetCodexThreadCommand.RaiseCanExecuteChanged();
+        _newCodexSessionAndRetryCommand.RaiseCanExecuteChanged();
+        _copyCodexThreadIdCommand.RaiseCanExecuteChanged();
         _handoffResultCommand.RaiseCanExecuteChanged();
         _completeCurrentRoundCommand.RaiseCanExecuteChanged();
         _clearCurrentTaskCommand.RaiseCanExecuteChanged();

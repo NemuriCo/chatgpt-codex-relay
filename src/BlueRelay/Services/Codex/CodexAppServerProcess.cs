@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace BlueRelay.Services.Codex;
 
-public sealed class CodexAppServerProcess : IAsyncDisposable
+public sealed class CodexAppServerProcess : ICodexAppServerProcess
 {
     private readonly string _executablePath;
     private Process? _process;

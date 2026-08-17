@@ -89,6 +89,19 @@ public sealed class UiTextSet
     public required string BrowserConnected { get; init; }
     public required string BrowserDisconnected { get; init; }
     public required string BrowserNotBound { get; init; }
+    public required string ChatGPTBinding { get; init; }
+    public required string ChatGPTNotBound { get; init; }
+    public required string ChatGPTConversationChanged { get; init; }
+    public required string CodexSession { get; init; }
+    public required string CodexNotBound { get; init; }
+    public required string CodexBound { get; init; }
+    public required string CodexConflict { get; init; }
+    public required string NewCodexSessionAndRetry { get; init; }
+    public required string NewCodexSessionAndRetryTitle { get; init; }
+    public required string NewCodexSessionAndRetryMessage { get; init; }
+    public required string CodexSessionRetried { get; init; }
+    public required string CopyCodexThreadId { get; init; }
+    public required string CodexThreadIdCopied { get; init; }
     public required string SendToCodex { get; init; }
     public required string RetryCodex { get; init; }
     public required string CodexRunning { get; init; }
@@ -241,6 +254,19 @@ public static class LocalizationService
         BrowserConnected = "ChatGPT • connected",
         BrowserDisconnected = "ChatGPT • disconnected",
         BrowserNotBound = "ChatGPT • not bound",
+        ChatGPTBinding = "ChatGPT",
+        ChatGPTNotBound = "Not bound",
+        ChatGPTConversationChanged = "Conversation changed — rebind required",
+        CodexSession = "Codex",
+        CodexNotBound = "No Codex session",
+        CodexBound = "Session linked",
+        CodexConflict = "Session used by another process",
+        NewCodexSessionAndRetry = "New Codex session and retry",
+        NewCodexSessionAndRetryTitle = "Start a new Codex session and retry?",
+        NewCodexSessionAndRetryMessage = "The current task and ChatGPT pairing will be kept. Only the Codex session will be replaced, then the task will be retried.",
+        CodexSessionRetried = "A new Codex session was started and the task was retried.",
+        CopyCodexThreadId = "Copy Codex thread ID",
+        CodexThreadIdCopied = "Codex thread ID copied.",
         SendToCodex = "Confirm send",
         RetryCodex = "Retry Codex task",
         CodexRunning = "Codex running",
@@ -392,6 +418,19 @@ public static class LocalizationService
         BrowserConnected = "ChatGPT · 已连接",
         BrowserDisconnected = "ChatGPT · 已断开",
         BrowserNotBound = "ChatGPT · 未绑定",
+        ChatGPTBinding = "ChatGPT",
+        ChatGPTNotBound = "未绑定",
+        ChatGPTConversationChanged = "对话已切换，需要重新绑定",
+        CodexSession = "Codex",
+        CodexNotBound = "未绑定 Codex 会话",
+        CodexBound = "会话已绑定",
+        CodexConflict = "会话正被其他进程使用",
+        NewCodexSessionAndRetry = "新建 Codex 会话并重试",
+        NewCodexSessionAndRetryTitle = "新建 Codex 会话并重试？",
+        NewCodexSessionAndRetryMessage = "将保留当前任务和 ChatGPT 绑定，只替换 Codex 会话，然后重试当前任务。",
+        CodexSessionRetried = "已新建 Codex 会话并重试当前任务。",
+        CopyCodexThreadId = "复制 Codex 线程 ID",
+        CodexThreadIdCopied = "Codex 线程 ID 已复制。",
         SendToCodex = "确认发送",
         RetryCodex = "重试发送给 Codex",
         CodexRunning = "Codex 运行中",

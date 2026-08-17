@@ -11,6 +11,10 @@ public sealed record BridgeWorkstreamDto(
     string? CurrentTaskId,
     string? CurrentTaskPrompt,
     string? CurrentTaskResult,
+    string? ChatGPTConversationId,
+    string? ChatGPTUrl,
+    string? ChatGPTTitle,
+    string? CodexThreadId,
     BrowserBindingDto? Binding);
 
 public sealed record BrowserBindingDto(
@@ -22,7 +26,8 @@ public sealed record BrowserBindingDto(
     string? ChatGPTConversationId,
     string PageTitle,
     DateTimeOffset LastSeenAt,
-    bool Connected);
+    bool Connected,
+    bool ConversationMismatch = false);
 
 public sealed record BridgeHealthDto(
     string Status,
@@ -41,7 +46,8 @@ public sealed record RegisterTabRequest(
 public sealed record BindTabRequest(
     string InstallationId,
     string TabId,
-    Guid WorkstreamId);
+    Guid WorkstreamId,
+    bool Rebind = false);
 
 public sealed record CaptureTaskRequest(
     string InstallationId,
@@ -59,8 +65,10 @@ public sealed record HandoffCommand(
     Guid CommandId,
     Guid TaskId,
     Guid WorkstreamId,
+    string InstallationId,
     string TabId,
     string ChatGPTUrl,
+    string? ChatGPTConversationId,
     string Result,
     RelayCommandDeliveryStatus DeliveryStatus = RelayCommandDeliveryStatus.Queued,
     int AttemptCount = 0,

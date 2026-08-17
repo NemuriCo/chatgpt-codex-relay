@@ -91,7 +91,7 @@ public sealed class JsonStateStoreTests
         Assert.AreEqual(1, result.State.Projects.Count);
         Assert.AreEqual(projectId, result.State.Projects[0].Id);
         Assert.IsTrue(result.WasMigrated);
-        Assert.AreEqual(3, result.State.SchemaVersion);
+        Assert.AreEqual(4, result.State.SchemaVersion);
         Assert.AreEqual(1, result.State.Projects[0].Workstreams.Count);
         Assert.AreEqual(WorkflowState.ReadyForCodex, result.State.Projects[0].Workstreams[0].CurrentState);
         Assert.AreEqual(projectId, result.State.Projects[0].Workstreams[0].ProjectId);
@@ -109,7 +109,7 @@ public sealed class JsonStateStoreTests
         await new JsonStateStore(path).SaveAsync(result.State);
         var migratedReload = await new JsonStateStore(path).LoadAsync();
         Assert.IsFalse(migratedReload.WasMigrated);
-        Assert.AreEqual(3, migratedReload.State.SchemaVersion);
+        Assert.AreEqual(4, migratedReload.State.SchemaVersion);
         Assert.AreEqual(WorkflowState.ReadyForCodex, migratedReload.State.Projects[0].Workstreams[0].CurrentState);
     }
 

@@ -2,7 +2,7 @@ namespace BlueRelay.Models;
 
 public sealed class ApplicationState
 {
-    public int SchemaVersion { get; set; } = 3;
+    public int SchemaVersion { get; set; } = 4;
 
     public List<Project> Projects { get; set; } = [];
 

@@ -16,9 +16,15 @@ public sealed class Workstream
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public string? BrowserInstallationId { get; set; }
+
     public string? ChatGPTConversationId { get; set; }
 
     public string? ChatGPTTabId { get; set; }
+
+    public string? ChatGPTUrl { get; set; }
+
+    public string? ChatGPTTitle { get; set; }
 
     public string? CodexSessionId { get; set; }
 
@@ -31,6 +37,8 @@ public sealed class Workstream
     public string? CodexProgress { get; set; }
 
     public string? CodexError { get; set; }
+
+    public string? CodexErrorCode { get; set; }
 
     public string? CurrentTaskId { get; set; }
 }

@@ -7,7 +7,8 @@ public sealed record CodexDiagnosticSnapshot(
     int? ExitCode,
     string Stage,
     string? ErrorMessage,
-    IReadOnlyList<string> RecentMessages)
+    IReadOnlyList<string> RecentMessages,
+    long? ProcessGeneration = null)
 {
     public string ToDisplayText()
     {
@@ -25,6 +26,11 @@ public sealed record CodexDiagnosticSnapshot(
         if (ProcessId is not null)
         {
             lines.Add($"pid: {ProcessId}");
+        }
+
+        if (ProcessGeneration is not null)
+        {
+            lines.Add($"generation: {ProcessGeneration}");
         }
 
         if (ExitCode is not null)
@@ -53,6 +59,7 @@ internal sealed class CodexDiagnosticBuffer
     private string? _version;
     private int? _processId;
     private int? _exitCode;
+    private long? _processGeneration;
     private string _stage = "idle";
     private string? _errorMessage;
 
@@ -78,6 +85,14 @@ internal sealed class CodexDiagnosticBuffer
         lock (_gate)
         {
             _exitCode = exitCode;
+        }
+    }
+
+    public void SetGeneration(long generation)
+    {
+        lock (_gate)
+        {
+            _processGeneration = generation;
         }
     }
 
@@ -126,7 +141,8 @@ internal sealed class CodexDiagnosticBuffer
                 _exitCode,
                 _stage,
                 _errorMessage,
-                _messages.ToArray());
+                _messages.ToArray(),
+                _processGeneration);
         }
     }
 

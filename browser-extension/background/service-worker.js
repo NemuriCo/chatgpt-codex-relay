@@ -241,7 +241,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const registration = await ensureRegistered(tab);
-      const data = await bridge.bindTab({ installationId: registration.config.installationId, tabId: String(tab.id), workstreamId: message.workstreamId });
+      const data = await bridge.bindTab({ installationId: registration.config.installationId, tabId: String(tab.id), workstreamId: message.workstreamId, rebind: Boolean(message.rebind) });
       sendResponse({ success: true, data });
     })().catch((error) => sendResponse({ success: false, message: error.message, code: error.code }));
     return true;

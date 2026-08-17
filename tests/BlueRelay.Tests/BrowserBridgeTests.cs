@@ -49,6 +49,71 @@ public sealed class BrowserBridgeTests
     }
 
     [TestMethod]
+    public async Task ConversationNavigationPausesCaptureUntilExplicitRebind()
+    {
+        var state = new ApplicationState();
+        var projectService = new ProjectService(state, new MemoryStateStore(), new WorkflowStateMachine());
+        var bridge = new BrowserBridgeService(state, projectService);
+        var project = (await projectService.TryCreateAsync("Conversation binding", _testDirectory)).Project!;
+        var workstream = project.Workstreams[0];
+        Assert.IsTrue((await bridge.PairAsync(bridge.GeneratePairingCode().Code!, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
+
+        var heartbeat = await bridge.HeartbeatAsync(
+            "installation-a",
+            "tab-a",
+            "https://chatgpt.com/c/conversation-b",
+            "conversation-b",
+            "Conversation B");
+        Assert.IsTrue(heartbeat.Success, heartbeat.Error);
+        Assert.IsTrue(bridge.FindBindingDto(workstream.Id)!.ConversationMismatch);
+
+        var blocked = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nBlocked", "https://chatgpt.com/c/conversation-b", "conversation-b", "Conversation B"));
+        Assert.IsFalse(blocked.Success);
+        Assert.AreEqual("conversation_mismatch", blocked.ErrorCode);
+
+        var implicitBind = await bridge.BindTabAsync(new BindTabRequest("installation-a", "tab-a", workstream.Id));
+        Assert.IsFalse(implicitBind.Success);
+        Assert.AreEqual("conversation_mismatch", implicitBind.ErrorCode);
+
+        var explicitRebind = await bridge.BindTabAsync(new BindTabRequest("installation-a", "tab-a", workstream.Id, Rebind: true));
+        Assert.IsTrue(explicitRebind.Success, explicitRebind.Error);
+        Assert.AreEqual("conversation-b", workstream.ChatGPTConversationId);
+        Assert.IsFalse(bridge.FindBindingDto(workstream.Id)!.ConversationMismatch);
+
+        var captured = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nAllowed", "https://chatgpt.com/c/conversation-b", "conversation-b", "Conversation B"));
+        Assert.IsTrue(captured.Success, captured.Error);
+    }
+
+    [TestMethod]
+    public async Task StaleTabCanBeReplacedByAnotherTabForTheSameConversation()
+    {
+        var state = new ApplicationState();
+        var projectService = new ProjectService(state, new MemoryStateStore(), new WorkflowStateMachine());
+        var bridge = new BrowserBridgeService(state, projectService);
+        var project = (await projectService.TryCreateAsync("Browser restart", _testDirectory)).Project!;
+        var workstream = project.Workstreams[0];
+        Assert.IsTrue((await bridge.PairAsync(bridge.GeneratePairingCode().Code!, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "old-tab", workstream.Id);
+        var oldBinding = state.BrowserBridge.Bindings.Single(item => item.TabId == "old-tab");
+        oldBinding.Connected = false;
+        oldBinding.LastSeenAt = DateTimeOffset.UtcNow.AddMinutes(-2);
+
+        var register = await bridge.RegisterTabAsync(new RegisterTabRequest(
+            "installation-a", "new-tab", "https://chatgpt.com/c/new", "old-tab", "New browser tab"));
+        Assert.IsTrue(register.Success, register.Error);
+        var bind = await bridge.BindTabAsync(new BindTabRequest("installation-a", "new-tab", workstream.Id));
+
+        Assert.IsTrue(bind.Success, bind.Error);
+        Assert.AreEqual("new-tab", workstream.ChatGPTTabId);
+        Assert.AreEqual("old-tab", workstream.ChatGPTConversationId);
+        Assert.IsNull(oldBinding.WorkstreamId);
+        Assert.AreEqual(workstream.Id, bridge.FindBindingDto(workstream.Id)!.WorkstreamId);
+    }
+
+    [TestMethod]
     public async Task TwoTabsCaptureAndHandoffOnlyTheirOwnWorkstreams()
     {
         var (bridge, projectService) = CreateBridge();
@@ -70,7 +135,7 @@ public sealed class BrowserBridgeTests
         Assert.AreEqual("not_a_codex_task", ignored.ErrorCode);
 
         var firstCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
-            "installation-a", "tab-a", "# CODEX_TASK\nImplement First", "https://chatgpt.com/c/first", "first", "First tab"));
+            "installation-a", "tab-a", "# CODEX_TASK\nImplement First", "https://chatgpt.com/c/first", "tab-a", "First tab"));
         Assert.IsTrue(firstCapture.Success, firstCapture.Error);
         Assert.AreEqual(WorkflowState.ReadyForCodex, first.Workstreams[0].CurrentState);
         Assert.AreEqual(WorkflowState.Idle, second.Workstreams[0].CurrentState);
@@ -130,7 +195,7 @@ public sealed class BrowserBridgeTests
         await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
 
         var firstCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
-            "installation-a", "tab-a", "# CODEX_TASK\nFirst round", "https://chatgpt.com/c/first", "first", "First tab"));
+            "installation-a", "tab-a", "# CODEX_TASK\nFirst round", "https://chatgpt.com/c/first", "tab-a", "First tab"));
         Assert.IsTrue(firstCapture.Success, firstCapture.Error);
         Assert.IsTrue((await bridge.ConfirmTaskAsync(firstCapture.Value!.Id)).Success);
         Assert.IsTrue((await bridge.SimulateResultAsync(firstCapture.Value.Id, "first result")).Success);
@@ -149,7 +214,7 @@ public sealed class BrowserBridgeTests
         Assert.IsNull((await bridge.GetNextCommandAsync("installation-a", "tab-a")).Value);
 
         var secondCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
-            "installation-a", "tab-a", "# CODEX_TASK\nSecond round", "https://chatgpt.com/c/second", "second", "First tab"));
+            "installation-a", "tab-a", "# CODEX_TASK\nSecond round", "https://chatgpt.com/c/second", "tab-a", "First tab"));
         Assert.IsTrue(secondCapture.Success, secondCapture.Error);
         Assert.AreNotEqual(firstCapture.Value.Id, secondCapture.Value!.Id);
         Assert.AreEqual(WorkflowState.ReadyForCodex, workstream.CurrentState);
@@ -166,7 +231,7 @@ public sealed class BrowserBridgeTests
         Assert.AreEqual(WorkflowState.ChatGPTReviewing, workstream.CurrentState);
 
         var thirdCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
-            "installation-a", "tab-a", "# CODEX_TASK\nReview follow-up", "https://chatgpt.com/c/follow-up", "follow-up", "First tab"));
+            "installation-a", "tab-a", "# CODEX_TASK\nReview follow-up", "https://chatgpt.com/c/follow-up", "tab-a", "First tab"));
         Assert.IsTrue(thirdCapture.Success, thirdCapture.Error);
         Assert.AreEqual(WorkflowState.ReadyForCodex, workstream.CurrentState);
         Assert.AreEqual(thirdCapture.Value!.Id.ToString("D"), workstream.CurrentTaskId);
@@ -187,7 +252,7 @@ public sealed class BrowserBridgeTests
         await RegisterAndBindAsync(bridge, "tab-b", secondWorkstream.Id);
 
         var firstCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
-            "installation-a", "tab-a", "# CODEX_TASK\nReview me", "https://chatgpt.com/c/first", "first", "First tab"));
+            "installation-a", "tab-a", "# CODEX_TASK\nReview me", "https://chatgpt.com/c/first", "tab-a", "First tab"));
         Assert.IsTrue(firstCapture.Success, firstCapture.Error);
         Assert.IsTrue((await bridge.ConfirmTaskAsync(firstCapture.Value!.Id)).Success);
         Assert.IsTrue((await bridge.SimulateResultAsync(firstCapture.Value.Id, "review result")).Success);
@@ -199,7 +264,7 @@ public sealed class BrowserBridgeTests
         Assert.AreEqual(WorkflowState.ChatGPTReviewing, firstWorkstream.CurrentState);
 
         var siblingCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
-            "installation-a", "tab-b", "# CODEX_TASK\nSibling task", "https://chatgpt.com/c/sibling", "sibling", "Sibling tab"));
+            "installation-a", "tab-b", "# CODEX_TASK\nSibling task", "https://chatgpt.com/c/sibling", "tab-b", "Sibling tab"));
         Assert.IsTrue(siblingCapture.Success, siblingCapture.Error);
 
         var clear = await bridge.ClearCurrentTaskAsync(firstWorkstream.Id);
@@ -214,7 +279,7 @@ public sealed class BrowserBridgeTests
         Assert.AreEqual(siblingCapture.Value!.Id.ToString("D"), secondWorkstream.CurrentTaskId);
 
         var newCapture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
-            "installation-a", "tab-a", "# CODEX_TASK\nFresh task", "https://chatgpt.com/c/fresh", "fresh", "First tab"));
+            "installation-a", "tab-a", "# CODEX_TASK\nFresh task", "https://chatgpt.com/c/fresh", "tab-a", "First tab"));
         Assert.IsTrue(newCapture.Success, newCapture.Error);
         Assert.AreEqual(WorkflowState.ReadyForCodex, firstWorkstream.CurrentState);
         Assert.AreEqual(newCapture.Value!.Id.ToString("D"), firstWorkstream.CurrentTaskId);
@@ -233,7 +298,7 @@ public sealed class BrowserBridgeTests
         await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
 
         var capture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
-            "installation-a", "tab-a", "# CODEX_TASK\nPending task", "https://chatgpt.com/c/pending", "pending", "First tab"));
+            "installation-a", "tab-a", "# CODEX_TASK\nPending task", "https://chatgpt.com/c/pending", "tab-a", "First tab"));
         Assert.IsTrue(capture.Success, capture.Error);
         Assert.IsTrue((await bridge.ConfirmTaskAsync(capture.Value!.Id)).Success);
         Assert.IsTrue((await bridge.SimulateResultAsync(capture.Value.Id, "pending result")).Success);

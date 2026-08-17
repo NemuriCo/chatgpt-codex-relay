@@ -222,7 +222,21 @@ public sealed class BrowserBridgeService
             binding.PageTitle = request.PageTitle ?? string.Empty;
             binding.LastSeenAt = DateTimeOffset.UtcNow;
             binding.Connected = true;
-            await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+            var workstream = binding.WorkstreamId is { } workstreamId
+                ? _projectService.FindWorkstreamForId(workstreamId)
+                : null;
+            binding.ConversationMismatch = workstream is not null && !IsConversationCompatible(workstream, binding.ChatGPTConversationId);
+            var changed = workstream is not null && !binding.ConversationMismatch
+                ? SyncWorkstreamPairing(workstream, binding, overwriteConversation: false)
+                : true;
+            if (changed)
+            {
+                var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+                if (!saveResult.Success)
+                {
+                    return Failure("persistence_failed", saveResult.Error);
+                }
+            }
             Changed?.Invoke(this, EventArgs.Empty);
             return new BridgeOperationResult(true);
         }
@@ -259,11 +273,32 @@ public sealed class BrowserBridgeService
                 return Failure("tab_not_registered", "Register the ChatGPT tab before sending a heartbeat.");
             }
 
+            var previousConversationId = binding.ChatGPTConversationId;
+            var previousUrl = binding.ChatGPTUrl;
+            var previousTitle = binding.PageTitle;
             binding.ChatGPTUrl = chatGPTUrl;
             binding.ChatGPTConversationId = conversationId;
             binding.PageTitle = pageTitle ?? string.Empty;
             binding.LastSeenAt = DateTimeOffset.UtcNow;
             binding.Connected = true;
+            var workstream = binding.WorkstreamId is { } workstreamId
+                ? _projectService.FindWorkstreamForId(workstreamId)
+                : null;
+            binding.ConversationMismatch = workstream is not null && !IsConversationCompatible(workstream, conversationId);
+            var changed = !string.Equals(previousConversationId, conversationId, StringComparison.Ordinal) ||
+                          !string.Equals(previousUrl, chatGPTUrl, StringComparison.Ordinal) ||
+                          !string.Equals(previousTitle, binding.PageTitle, StringComparison.Ordinal) ||
+                          workstream is not null && !binding.ConversationMismatch && SyncWorkstreamPairing(workstream, binding, overwriteConversation: false);
+            if (changed)
+            {
+                var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+                if (!saveResult.Success)
+                {
+                    return Failure("persistence_failed", saveResult.Error);
+                }
+
+                Changed?.Invoke(this, EventArgs.Empty);
+            }
             return new BridgeOperationResult(true);
         }
         finally
@@ -295,15 +330,47 @@ public sealed class BrowserBridgeService
                 return Failure("workstream_not_found", "The selected workstream no longer exists.");
             }
 
-            var previousAssignments = _state.BrowserBridge.Bindings
-                .Select(item => (Binding: item, WorkstreamId: item.WorkstreamId))
+            MarkDisconnectedBindings();
+            var assignedToAnotherWorkstream = binding.WorkstreamId is { } currentWorkstreamId && currentWorkstreamId != workstream.Id;
+            if (assignedToAnotherWorkstream && !request.Rebind)
+            {
+                return Failure("tab_already_bound", "This ChatGPT tab is already bound to another Workstream.");
+            }
+
+            if (!IsConversationCompatible(workstream, binding.ChatGPTConversationId) && !request.Rebind)
+            {
+                return Failure("conversation_mismatch", "This Workstream is bound to another ChatGPT conversation.");
+            }
+
+            var existingAssignments = _state.BrowserBridge.Bindings
+                .Where(item => item.WorkstreamId == workstream.Id && !ReferenceEquals(item, binding))
                 .ToList();
-            foreach (var other in _state.BrowserBridge.Bindings.Where(item => item.WorkstreamId == request.WorkstreamId && !ReferenceEquals(item, binding)))
+            if (existingAssignments.Any(item => IsConnected(item)) && !request.Rebind)
+            {
+                return Failure("workstream_already_bound", "This Workstream is already bound to another active ChatGPT tab.");
+            }
+
+            var previousAssignments = _state.BrowserBridge.Bindings
+                .Select(item => (Binding: item, WorkstreamId: item.WorkstreamId, ConversationMismatch: item.ConversationMismatch))
+                .ToList();
+            var previousPairing = CapturePairing(workstream);
+            var cancelledHandoffs = new List<CancelledHandoff>();
+            var changedConversation = !string.IsNullOrWhiteSpace(workstream.ChatGPTConversationId) &&
+                                      !string.Equals(workstream.ChatGPTConversationId, binding.ChatGPTConversationId, StringComparison.Ordinal);
+            if (request.Rebind && changedConversation)
+            {
+                cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstream.Id);
+            }
+
+            foreach (var other in existingAssignments)
             {
                 other.WorkstreamId = null;
+                other.ConversationMismatch = false;
             }
 
             binding.WorkstreamId = workstream.Id;
+            binding.ConversationMismatch = false;
+            SyncWorkstreamPairing(workstream, binding, overwriteConversation: request.Rebind);
             binding.LastSeenAt = DateTimeOffset.UtcNow;
             binding.Connected = true;
             var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
@@ -312,7 +379,10 @@ public sealed class BrowserBridgeService
                 foreach (var previous in previousAssignments)
                 {
                     previous.Binding.WorkstreamId = previous.WorkstreamId;
+                    previous.Binding.ConversationMismatch = previous.ConversationMismatch;
                 }
+                RestorePairing(workstream, previousPairing);
+                RestoreCancelledHandoffs(cancelledHandoffs);
 
                 return Failure("persistence_failed", saveResult.Error);
             }
@@ -335,9 +405,22 @@ public sealed class BrowserBridgeService
         {
             var cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstreamId);
             var changed = cancelledHandoffs.Count > 0;
+            var workstream = _projectService.FindWorkstreamForId(workstreamId);
+            var previousPairing = workstream is null ? null : CapturePairing(workstream);
+            var previousBindings = _state.BrowserBridge.Bindings
+                .Where(item => item.WorkstreamId == workstreamId)
+                .Select(item => (Binding: item, ConversationMismatch: item.ConversationMismatch))
+                .ToList();
             foreach (var binding in _state.BrowserBridge.Bindings.Where(item => item.WorkstreamId == workstreamId))
             {
                 binding.WorkstreamId = null;
+                binding.ConversationMismatch = false;
+                changed = true;
+            }
+
+            if (workstream is not null && HasPairing(workstream))
+            {
+                ClearChatGPTPairing(workstream);
                 changed = true;
             }
 
@@ -350,6 +433,15 @@ public sealed class BrowserBridgeService
             if (!saveResult.Success)
             {
                 RestoreCancelledHandoffs(cancelledHandoffs);
+                if (workstream is not null && previousPairing is not null)
+                {
+                    RestorePairing(workstream, previousPairing);
+                }
+                foreach (var previous in previousBindings)
+                {
+                    previous.Binding.WorkstreamId = workstreamId;
+                    previous.Binding.ConversationMismatch = previous.ConversationMismatch;
+                }
                 return Failure("persistence_failed", saveResult.Error);
             }
 
@@ -385,6 +477,17 @@ public sealed class BrowserBridgeService
             {
                 binding.WorkstreamId = null;
                 return Failure<RelayTask>("workstream_not_found", "The bound Workstream no longer exists.");
+            }
+
+            if (binding.ConversationMismatch || !IsConversationCompatible(workstream, binding.ChatGPTConversationId))
+            {
+                return Failure<RelayTask>("conversation_mismatch", "The current ChatGPT conversation is not the one bound to this Workstream.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.ChatGPTConversationId) &&
+                !string.Equals(request.ChatGPTConversationId, binding.ChatGPTConversationId, StringComparison.Ordinal))
+            {
+                return Failure<RelayTask>("conversation_mismatch", "The current ChatGPT conversation is not the one bound to this Workstream.");
             }
 
             var cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstream.Id);
@@ -487,6 +590,7 @@ public sealed class BrowserBridgeService
             task.UpdatedAt = DateTimeOffset.UtcNow;
             workstream.CodexProgress = "准备启动 Codex";
             workstream.CodexError = null;
+            workstream.CodexErrorCode = null;
             var stateResult = await _projectService.TryChangeStateAsync(
                 workstream.ProjectId,
                 workstream.Id,
@@ -536,6 +640,7 @@ public sealed class BrowserBridgeService
 
             currentWorkstream.CodexProgress = codexResult.Success ? "Codex 已完成" : null;
             currentWorkstream.CodexError = codexResult.Error;
+            currentWorkstream.CodexErrorCode = codexResult.ErrorCode;
             currentTask.CodexTurnId = codexResult.TurnId;
             currentTask.CodexError = codexResult.Error;
             if (!string.IsNullOrWhiteSpace(codexResult.ThreadId))
@@ -546,6 +651,7 @@ public sealed class BrowserBridgeService
 
             if (codexResult.Success && !string.IsNullOrWhiteSpace(codexResult.Result))
             {
+                currentWorkstream.CodexErrorCode = null;
                 currentTask.Result = codexResult.Result.Trim();
                 currentTask.ResultPayload = await _payloadStore.WriteAsync(
                     currentWorkstream.Id,
@@ -574,7 +680,9 @@ public sealed class BrowserBridgeService
             {
                 currentTask.Status = RelayTaskStatus.Error;
                 currentTask.UpdatedAt = DateTimeOffset.UtcNow;
-                var targetState = codexResult.Cancelled ? WorkflowState.NeedsAttention : WorkflowState.Error;
+                var targetState = codexResult.ErrorCode == "codex_thread_conflict" || codexResult.Cancelled
+                    ? WorkflowState.NeedsAttention
+                    : WorkflowState.Error;
                 var stateResult = await _projectService.TryChangeStateAsync(
                     currentWorkstream.ProjectId,
                     currentWorkstream.Id,
@@ -596,7 +704,11 @@ public sealed class BrowserBridgeService
             Changed?.Invoke(this, EventArgs.Empty);
             return codexResult.Success
                 ? new BridgeOperationResult<RelayTask>(true, currentTask)
-                : new BridgeOperationResult<RelayTask>(false, currentTask, codexResult.Cancelled ? "codex_cancelled" : "codex_failed", codexResult.Error ?? "Codex did not return a result.");
+                : new BridgeOperationResult<RelayTask>(
+                    false,
+                    currentTask,
+                    codexResult.ErrorCode ?? (codexResult.Cancelled ? "codex_cancelled" : "codex_failed"),
+                    codexResult.Error ?? "Codex did not return a result.");
         }
         finally
         {
@@ -670,6 +782,49 @@ public sealed class BrowserBridgeService
         {
             _gate.Release();
         }
+    }
+
+    public async Task<BridgeOperationResult<RelayTask>> NewCodexSessionAndRetryAsync(
+        Guid workstreamId,
+        string? userNote = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (_codexBridge is null)
+        {
+            return Failure<RelayTask>("codex_unavailable", "The real Codex App Server bridge is not configured.");
+        }
+
+        RelayTask? task;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var workstream = _projectService.FindWorkstreamForId(workstreamId);
+            task = workstream is null ? null : FindCurrentTask(workstream);
+            if (workstream is null || task is null)
+            {
+                return Failure<RelayTask>("task_not_found", "The current Workstream task no longer exists.");
+            }
+
+            if (workstream.CurrentState == WorkflowState.CodexRunning)
+            {
+                return Failure<RelayTask>("codex_turn_active", "Cancel the active Codex turn before starting a new session.");
+            }
+
+            await _codexBridge.ResetThreadAsync(workstream, cancellationToken).ConfigureAwait(false);
+            var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+            if (!saveResult.Success)
+            {
+                return Failure<RelayTask>("persistence_failed", saveResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        return await SendTaskToCodexAsync(task!.Id, userNote ?? task.UserNote, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<BridgeOperationResult<RelayTask>> SimulateResultAsync(
@@ -770,23 +925,31 @@ public sealed class BrowserBridgeService
                 return Failure<HandoffCommand>("result_missing", "There is no result to send back to ChatGPT.");
             }
 
-            var binding = _state.BrowserBridge.Bindings.FirstOrDefault(item => item.TabKey == task.SourceTabKey);
-            if (binding is null || binding.WorkstreamId != task.WorkstreamId)
+            MarkDisconnectedBindings();
+            var binding = _state.BrowserBridge.Bindings.FirstOrDefault(item => item.WorkstreamId == task.WorkstreamId);
+            if (binding is null)
             {
-                return Failure<HandoffCommand>("tab_not_bound", "The original ChatGPT tab is no longer bound to this Workstream.");
+                return Failure<HandoffCommand>("tab_not_bound", "The ChatGPT conversation is not currently bound to this Workstream.");
+            }
+
+            if (binding.ConversationMismatch || !IsConversationCompatible(workstream, binding.ChatGPTConversationId))
+            {
+                return Failure<HandoffCommand>("conversation_mismatch", "The original ChatGPT conversation is not currently connected.");
             }
 
             if (!IsConnected(binding))
             {
-                return Failure<HandoffCommand>("tab_disconnected", "The original ChatGPT tab is disconnected. Keep the result and reconnect the tab.");
+                return Failure<HandoffCommand>("tab_disconnected", "The ChatGPT tab is disconnected. Keep the result and reconnect the conversation.");
             }
 
             var command = new HandoffCommand(
                 Guid.NewGuid(),
                 task.Id,
                 task.WorkstreamId,
+                binding.InstallationId,
                 binding.TabId,
                 binding.ChatGPTUrl,
+                binding.ChatGPTConversationId,
                 RelayPromptComposer.ComposeResult(task.ResultNote, task.Result),
                 RelayCommandDeliveryStatus.Queued,
                 0,
@@ -841,9 +1004,42 @@ public sealed class BrowserBridgeService
                 return Failure<HandoffCommand>("tab_not_registered", "The tab is not registered.");
             }
 
+            if (binding.WorkstreamId is { } boundWorkstreamId &&
+                _projectService.FindWorkstreamForId(boundWorkstreamId) is { } boundWorkstream &&
+                (binding.ConversationMismatch || !IsConversationCompatible(boundWorkstream, binding.ChatGPTConversationId)))
+            {
+                return Failure<HandoffCommand>("conversation_mismatch", "The current ChatGPT conversation is not the one bound to this Workstream.");
+            }
+
             if (!_handoffCommands.TryGetValue(binding.TabKey, out var command))
             {
-                return new BridgeOperationResult<HandoffCommand>(true);
+                var candidate = _handoffCommands.FirstOrDefault(item =>
+                    item.Value.WorkstreamId == binding.WorkstreamId &&
+                    string.Equals(item.Value.ChatGPTConversationId, binding.ChatGPTConversationId, StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(binding.ChatGPTConversationId));
+                if (candidate.Value is null)
+                {
+                    return new BridgeOperationResult<HandoffCommand>(true);
+                }
+
+                _handoffCommands.Remove(candidate.Key);
+                command = candidate.Value with
+                {
+                    InstallationId = binding.InstallationId,
+                    TabId = binding.TabId,
+                    ChatGPTUrl = binding.ChatGPTUrl,
+                    ChatGPTConversationId = binding.ChatGPTConversationId,
+                    DeliveryStatus = RelayCommandDeliveryStatus.Queued,
+                    AttemptCount = 0,
+                    LastAttemptAt = null
+                };
+                _handoffCommands[binding.TabKey] = command;
+                var migratedTask = FindTask(command.TaskId);
+                if (migratedTask is not null)
+                {
+                    migratedTask.DeliveryStatus = RelayCommandDeliveryStatus.Queued;
+                    migratedTask.DeliveryErrorCode = null;
+                }
             }
 
             var commandTask = FindTask(command.TaskId);
@@ -1101,6 +1297,10 @@ public sealed class BrowserBridgeService
                     workstream.CurrentTaskId,
                     task?.Prompt,
                     task?.Result,
+                    workstream.ChatGPTConversationId,
+                    workstream.ChatGPTUrl,
+                    workstream.ChatGPTTitle,
+                    workstream.CodexThreadId,
                     binding is null ? null : ToDto(binding));
             }))
             .ToList();
@@ -1278,7 +1478,77 @@ public sealed class BrowserBridgeService
             binding.ChatGPTConversationId,
             binding.PageTitle,
             binding.LastSeenAt,
-            IsConnected(binding));
+            IsConnected(binding),
+            binding.ConversationMismatch);
+    }
+
+    private sealed record PairingSnapshot(
+        string? BrowserInstallationId,
+        string? ChatGPTConversationId,
+        string? ChatGPTTabId,
+        string? ChatGPTUrl,
+        string? ChatGPTTitle);
+
+    private static PairingSnapshot CapturePairing(Workstream workstream)
+    {
+        return new PairingSnapshot(
+            workstream.BrowserInstallationId,
+            workstream.ChatGPTConversationId,
+            workstream.ChatGPTTabId,
+            workstream.ChatGPTUrl,
+            workstream.ChatGPTTitle);
+    }
+
+    private static void RestorePairing(Workstream workstream, PairingSnapshot snapshot)
+    {
+        workstream.BrowserInstallationId = snapshot.BrowserInstallationId;
+        workstream.ChatGPTConversationId = snapshot.ChatGPTConversationId;
+        workstream.ChatGPTTabId = snapshot.ChatGPTTabId;
+        workstream.ChatGPTUrl = snapshot.ChatGPTUrl;
+        workstream.ChatGPTTitle = snapshot.ChatGPTTitle;
+    }
+
+    private static bool HasPairing(Workstream workstream)
+    {
+        return !string.IsNullOrWhiteSpace(workstream.BrowserInstallationId) ||
+               !string.IsNullOrWhiteSpace(workstream.ChatGPTConversationId) ||
+               !string.IsNullOrWhiteSpace(workstream.ChatGPTTabId) ||
+               !string.IsNullOrWhiteSpace(workstream.ChatGPTUrl) ||
+               !string.IsNullOrWhiteSpace(workstream.ChatGPTTitle);
+    }
+
+    private static void ClearChatGPTPairing(Workstream workstream)
+    {
+        workstream.BrowserInstallationId = null;
+        workstream.ChatGPTConversationId = null;
+        workstream.ChatGPTTabId = null;
+        workstream.ChatGPTUrl = null;
+        workstream.ChatGPTTitle = null;
+    }
+
+    private static bool SyncWorkstreamPairing(
+        Workstream workstream,
+        BrowserBinding binding,
+        bool overwriteConversation)
+    {
+        var previous = CapturePairing(workstream);
+        workstream.BrowserInstallationId = binding.InstallationId;
+        workstream.ChatGPTTabId = binding.TabId;
+        if (overwriteConversation || string.IsNullOrWhiteSpace(workstream.ChatGPTConversationId))
+        {
+            workstream.ChatGPTConversationId = binding.ChatGPTConversationId;
+        }
+
+        workstream.ChatGPTUrl = binding.ChatGPTUrl;
+        workstream.ChatGPTTitle = binding.PageTitle;
+        return previous != CapturePairing(workstream);
+    }
+
+    private static bool IsConversationCompatible(Workstream workstream, string? conversationId)
+    {
+        return string.IsNullOrWhiteSpace(workstream.ChatGPTConversationId) ||
+               !string.IsNullOrWhiteSpace(conversationId) &&
+               string.Equals(workstream.ChatGPTConversationId, conversationId, StringComparison.Ordinal);
     }
 
     private static BridgeOperationResult Failure(string code, string message) => new(false, code, message);
