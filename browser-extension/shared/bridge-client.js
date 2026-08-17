@@ -64,6 +64,10 @@
     bindTab: (payload) => post("/tabs/bind", payload),
     captureTask: (payload) => post("/tasks/capture", payload),
     nextCommand: (installationId, tabId) => request(`/commands/next?installationId=${encodeURIComponent(installationId)}&tabId=${encodeURIComponent(tabId)}`),
-    acknowledge: (commandId, success) => post(`/commands/${encodeURIComponent(commandId)}/ack`, { success })
+    acknowledge: (commandId, success, code, method) => post(`/commands/${encodeURIComponent(commandId)}/ack`, {
+      success,
+      code: code || null,
+      method: method || null
+    })
   };
 })(typeof self !== "undefined" ? self : window);

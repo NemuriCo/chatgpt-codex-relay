@@ -22,14 +22,63 @@ async function ensureRegistered(tab) {
   return { config, payload };
 }
 
-async function pollCommand(tab, config, payload) {
+function deliveryLog(stage, command, code) {
+  console.warn("[BlueRelay] result delivery", {
+    commandId: command?.commandId || null,
+    tabId: command?.tabId || null,
+    stage,
+    code: code || "unknown"
+  });
+}
+
+function errorCode(error, fallback) {
+  return error?.code || fallback;
+}
+
+async function acknowledgeCommand(command, success, code, method) {
   try {
-    const command = await bridge.nextCommand(config.installationId, payload.tabId);
-    if (!command) return;
-    const response = await chrome.tabs.sendMessage(tab.id, { type: "INJECT_RESULT", command });
-    await bridge.acknowledge(command.commandId, Boolean(response && response.success));
-  } catch (_) {
-    // A closed tab or a missing content script is expected during tab lifecycle changes.
+    await bridge.acknowledge(command.commandId, success, code, method);
+    return true;
+  } catch (error) {
+    deliveryLog("ack_api_failed", command, errorCode(error, "ack_api_failed"));
+    return false;
+  }
+}
+
+async function pollCommand(tab, config, payload) {
+  let command;
+  try {
+    command = await bridge.nextCommand(config.installationId, payload.tabId);
+  } catch (error) {
+    deliveryLog("next_command_failed", { tabId: payload.tabId }, errorCode(error, "next_command_failed"));
+    return;
+  }
+
+  if (!command) return;
+
+  let response;
+  try {
+    response = await chrome.tabs.sendMessage(tab.id, { type: "INJECT_RESULT", command });
+  } catch (error) {
+    const code = errorCode(error, "content_script_unavailable");
+    deliveryLog("content_script_unavailable", command, code);
+    await acknowledgeCommand(command, false, code);
+    return;
+  }
+
+  if (!response || response.success !== true) {
+    const code = response?.code || "injection_failed";
+    deliveryLog(code === "composer_not_found" ? "composer_not_found" : "composer_injection_failed", command, code);
+    const acknowledgementCode = response?.fallback === "clipboard"
+      ? "clipboard_fallback"
+      : response?.fallbackCode || code;
+    await acknowledgeCommand(command, false, acknowledgementCode, response?.method);
+    return;
+  }
+
+  const acknowledged = await acknowledgeCommand(command, true, null, response.method);
+  if (!acknowledged) {
+    deliveryLog("ack_api_failed", command, "ack_api_failed");
   }
 }
 
@@ -37,8 +86,12 @@ async function registerAndPoll(tab) {
   try {
     const registration = await ensureRegistered(tab);
     if (registration) await pollCommand(tab, registration.config, registration.payload);
-  } catch (_) {
-    // The popup exposes the actionable connection error; background heartbeats stay quiet.
+  } catch (error) {
+    console.warn("[BlueRelay] tab registration failed", {
+      tabId: tab?.id ? String(tab.id) : null,
+      stage: "registration",
+      code: errorCode(error, "registration_failed")
+    });
   }
 }
 

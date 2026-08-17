@@ -61,13 +61,21 @@ public sealed record HandoffCommand(
     Guid WorkstreamId,
     string TabId,
     string ChatGPTUrl,
-    string Result);
+    string Result,
+    RelayCommandDeliveryStatus DeliveryStatus = RelayCommandDeliveryStatus.Queued,
+    int AttemptCount = 0,
+    DateTimeOffset? LastAttemptAt = null);
 
 public sealed record PairRequest(string PairingCode, string InstallationId);
 
 public sealed record PairResponse(string Token, string InstallationId);
 
 public sealed record PairingCodeInfo(string? Code, DateTimeOffset? ExpiresAt);
+
+public sealed record CommandAcknowledgement(
+    bool Success,
+    string? Code = null,
+    string? Method = null);
 
 public sealed record BridgeOperationResult(bool Success, string ErrorCode = "", string Error = "");
 

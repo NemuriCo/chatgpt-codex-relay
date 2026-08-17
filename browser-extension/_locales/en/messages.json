@@ -22,5 +22,7 @@
   "bindingFailed": { "message": "Binding failed." },
   "taskCaptured": { "message": "Task captured" },
   "clipboardFailed": { "message": "Clipboard capture failed." },
-  "clipboardPermissionRequired": { "message": "Clipboard read permission is required to use this fallback capture feature." }
+  "clipboardPermissionRequired": { "message": "Clipboard read permission is required to use this fallback capture feature." },
+  "composerFallback": { "message": "BlueRelay could not fill ChatGPT automatically; the result was copied to the clipboard." },
+  "composerFallbackFailed": { "message": "BlueRelay could not fill ChatGPT automatically, and clipboard copy failed." }
 }

@@ -113,7 +113,7 @@ public sealed class MainViewModel : ObservableObject
         _selectProjectCommand = new RelayCommand(SelectProject);
         _selectWorkstreamCommand = new RelayCommand(SelectWorkstream);
         _confirmTaskCommand = new RelayCommand(ConfirmTaskAsync, CanRunTaskAction);
-        _handoffResultCommand = new RelayCommand(HandoffResultAsync, CanRunTaskAction);
+        _handoffResultCommand = new RelayCommand(HandoffResultAsync, CanHandoffResult);
         _openDebugCommand = new RelayCommand(OpenDebug, CanSelectWorkstream);
         _openSimulatedResultCommand = new RelayCommand(OpenSimulatedResult, CanSimulateResult);
         _simulateResultCommand = new RelayCommand(SimulateResultAsync, () => IsSimulatingResult && !string.IsNullOrWhiteSpace(SimulatedResultText));
@@ -1003,18 +1003,51 @@ public sealed class MainViewModel : ObservableObject
 
     private void BrowserBridge_Changed(object? sender, EventArgs e)
     {
-        RefreshDataOnUiThread(_state.SelectedProjectId, SelectedWorkstream?.Id);
+        RefreshDataOnUiThread(
+            _state.SelectedProjectId,
+            SelectedWorkstream?.Id,
+            UpdateDeliveryStatus);
     }
 
-    private void RefreshDataOnUiThread(Guid? preferredProjectId, Guid? preferredWorkstreamId)
+    private void RefreshDataOnUiThread(
+        Guid? preferredProjectId,
+        Guid? preferredWorkstreamId,
+        Action? afterRefresh = null)
     {
         if (WpfApplication.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
         {
-            _ = dispatcher.InvokeAsync(() => RefreshData(preferredProjectId, preferredWorkstreamId));
+            _ = dispatcher.InvokeAsync(() =>
+            {
+                RefreshData(preferredProjectId, preferredWorkstreamId);
+                afterRefresh?.Invoke();
+            });
             return;
         }
 
         RefreshData(preferredProjectId, preferredWorkstreamId);
+        afterRefresh?.Invoke();
+    }
+
+    private void UpdateDeliveryStatus()
+    {
+        var workstream = SelectedWorkstream;
+        if (workstream?.IsDeliveryPending == true)
+        {
+            SetStatus(Ui.HandoffQueued);
+        }
+        else if (workstream?.HasDeliveryError == true)
+        {
+            SetStatus(
+                workstream.DeliveryErrorCode == "clipboard_fallback"
+                    ? Ui.HandoffFallback
+                    : Ui.HandoffFailed,
+                isError: true);
+        }
+        else if (workstream?.CurrentState == WorkflowState.ChatGPTReviewing &&
+                 workstream.DeliveryStatus == RelayCommandDeliveryStatus.Delivered)
+        {
+            SetStatus(Ui.HandoffDelivered);
+        }
     }
 
     private void RefreshData(Guid? preferredProjectId, Guid? preferredWorkstreamId)
@@ -1136,6 +1169,11 @@ public sealed class MainViewModel : ObservableObject
     private bool CanRunTaskAction(object? parameter)
     {
         return parameter is ProjectListItemViewModel item && item.CurrentTask is not null;
+    }
+
+    private bool CanHandoffResult(object? parameter)
+    {
+        return parameter is ProjectListItemViewModel item && item.CanSendToChatGPT;
     }
 
     private bool CanSimulateResult(object? parameter)

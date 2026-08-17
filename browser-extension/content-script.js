@@ -12,7 +12,15 @@
   }
 
   function send(message) {
-    return new Promise((resolve) => chrome.runtime.sendMessage(message, (response) => resolve(response)));
+    return new Promise((resolve) => chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[BlueRelay] content message failed", { stage: "runtime_message", code: "runtime_message_failed" });
+        resolve({ success: false, code: "runtime_message_failed" });
+        return;
+      }
+
+      resolve(response);
+    }));
   }
 
   function extractCopyText(target) {
@@ -41,29 +49,17 @@
     await captureIfTask(selection || extractCopyText(event.target));
   }
 
-  function injectResult(result) {
-    const composer = utils.findComposer(document);
-    if (!composer) return false;
-    composer.focus();
-    if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
-      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(composer), "value")?.set;
-      if (setter) setter.call(composer, result); else composer.value = result;
-      composer.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-      composer.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-      return true;
-    }
-
-    composer.textContent = result;
-    composer.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "insertText", data: result }));
-    return true;
-  }
-
-  function showFallbackNotice() {
+  function showFallbackNotice(copySucceeded) {
     const notice = document.createElement("div");
     notice.id = "bluerelay-fallback-notice";
-    notice.textContent = /^zh/i.test(navigator.language)
-      ? "BlueRelay：找不到 ChatGPT 输入框，结果已复制到剪贴板。"
-      : "BlueRelay: ChatGPT composer not found. The result was copied to the clipboard.";
+    const localized = chrome.i18n?.getMessage?.(copySucceeded ? "composerFallback" : "composerFallbackFailed");
+    notice.textContent = localized || (/^zh/i.test(navigator.language)
+      ? copySucceeded
+        ? "BlueRelay：无法自动填入 ChatGPT，结果已复制到剪贴板。"
+        : "BlueRelay：无法自动填入 ChatGPT，且复制到剪贴板失败。"
+      : copySucceeded
+        ? "BlueRelay: ChatGPT could not be filled automatically; the result was copied to the clipboard."
+        : "BlueRelay: ChatGPT could not be filled automatically, and clipboard copy failed.");
     Object.assign(notice.style, {
       position: "fixed", zIndex: "2147483647", right: "18px", bottom: "18px",
       maxWidth: "360px", padding: "10px 12px", borderRadius: "8px",
@@ -78,12 +74,32 @@
   async function handleCommand(message) {
     if (message.type !== "INJECT_RESULT") return;
     const command = message.command;
-    const success = injectResult(command.result);
-    if (!success) {
-      try { await navigator.clipboard.writeText(command.result); } catch (_) { /* result remains in BlueRelay */ }
-      showFallbackNotice();
+    const injection = utils.injectComposerResult(command.result, document);
+    if (injection.success) {
+      return injection;
     }
-    return { success };
+
+    let clipboardSucceeded = false;
+    let clipboardCode = "clipboard_write_failed";
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+        clipboardCode = "clipboard_write_unavailable";
+      } else {
+        await navigator.clipboard.writeText(command.result);
+        clipboardSucceeded = true;
+      }
+    } catch (_) {
+      clipboardCode = "clipboard_write_failed";
+    }
+
+    showFallbackNotice(clipboardSucceeded);
+    return {
+      success: false,
+      code: injection.code || "injection_failed",
+      method: injection.method,
+      fallback: clipboardSucceeded ? "clipboard" : "clipboard_failed",
+      fallbackCode: clipboardSucceeded ? null : clipboardCode
+    };
   }
 
   document.addEventListener("click", (event) => { captureIfTask(extractCopyText(event.target)); }, true);

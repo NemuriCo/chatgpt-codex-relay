@@ -22,5 +22,7 @@
   "bindingFailed": { "message": "绑定失败。" },
   "taskCaptured": { "message": "任务已捕获。" },
   "clipboardFailed": { "message": "剪贴板捕获失败。" },
-  "clipboardPermissionRequired": { "message": "需要剪贴板读取权限才能使用此备用捕获功能。" }
+  "clipboardPermissionRequired": { "message": "需要剪贴板读取权限才能使用此备用捕获功能。" },
+  "composerFallback": { "message": "BlueRelay 无法自动填入 ChatGPT，结果已复制到剪贴板。" },
+  "composerFallbackFailed": { "message": "BlueRelay 无法自动填入 ChatGPT，且复制到剪贴板失败。" }
 }

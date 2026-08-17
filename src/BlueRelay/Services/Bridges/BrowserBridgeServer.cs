@@ -164,7 +164,7 @@ public sealed class BrowserBridgeServer : IBrowserBridgeServer
             await AuthorizedOperationAsync(context, () => _bridge.GetNextCommandAsync(installationId, tabId, cancellationToken)).ConfigureAwait(false));
 
         application.MapPost("/v1/commands/{commandId:guid}/ack", async (HttpContext context, Guid commandId, CommandAcknowledgement request, CancellationToken cancellationToken) =>
-            await AuthorizedOperationAsync(context, () => _bridge.AcknowledgeHandoffAsync(commandId, request.Success, cancellationToken)).ConfigureAwait(false));
+            await AuthorizedOperationAsync(context, () => _bridge.AcknowledgeHandoffAsync(commandId, request.Success, request.Code, cancellationToken)).ConfigureAwait(false));
     }
 
     private async Task<IResult> PairAsync(PairRequest request, CancellationToken cancellationToken)
@@ -235,5 +235,4 @@ public sealed class BrowserBridgeServer : IBrowserBridgeServer
     private static IResult Error(string code, string message, int statusCode) =>
         Results.Json(new { error = new { code, message } }, statusCode: statusCode);
 
-    public sealed record CommandAcknowledgement(bool Success);
 }

@@ -90,8 +90,12 @@ public sealed class UiTextSet
     public required string BrowserNotBound { get; init; }
     public required string SendToCodex { get; init; }
     public required string SendToChatGPT { get; init; }
+    public required string RetrySendToChatGPT { get; init; }
     public required string CodexSimulationStarted { get; init; }
     public required string HandoffQueued { get; init; }
+    public required string HandoffFailed { get; init; }
+    public required string HandoffFallback { get; init; }
+    public required string HandoffDelivered { get; init; }
     public required string SimulatedResultSaved { get; init; }
     public required string Debug { get; init; }
     public required string ManualState { get; init; }
@@ -217,8 +221,12 @@ public static class LocalizationService
         BrowserNotBound = "ChatGPT • not bound",
         SendToCodex = "Confirm send",
         SendToChatGPT = "Send back to ChatGPT",
+        RetrySendToChatGPT = "Retry sending to ChatGPT",
         CodexSimulationStarted = "Simulation started. Use ⋯ → Simulate Codex result.",
-        HandoffQueued = "Result queued for the original ChatGPT tab.",
+        HandoffQueued = "Sending result to the original ChatGPT tab...",
+        HandoffFailed = "Could not fill ChatGPT. You can retry; the result is preserved.",
+        HandoffFallback = "BlueRelay could not fill ChatGPT automatically; the result was copied to the clipboard.",
+        HandoffDelivered = "Result inserted into ChatGPT.",
         SimulatedResultSaved = "Simulated result saved. It is ready for ChatGPT.",
         Debug = "Debug",
         ManualState = "Set state manually",
@@ -341,8 +349,12 @@ public static class LocalizationService
         BrowserNotBound = "ChatGPT · 未绑定",
         SendToCodex = "确认发送",
         SendToChatGPT = "发回 ChatGPT",
+        RetrySendToChatGPT = "重试返回 ChatGPT",
         CodexSimulationStarted = "已进入模拟运行，请使用 ⋯ → 模拟 Codex 返回。",
-        HandoffQueued = "结果已发送到原 ChatGPT 标签页队列。",
+        HandoffQueued = "正在发送到原 ChatGPT 标签页…",
+        HandoffFailed = "未能填入 ChatGPT，可重试。结果仍已保留。",
+        HandoffFallback = "BlueRelay 无法自动填入，结果已复制到剪贴板。",
+        HandoffDelivered = "结果已填入 ChatGPT。",
         SimulatedResultSaved = "模拟结果已保存，可以发回 ChatGPT。",
         Debug = "调试",
         ManualState = "手动设置状态",

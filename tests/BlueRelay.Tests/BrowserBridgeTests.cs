@@ -85,8 +85,37 @@ public sealed class BrowserBridgeTests
         Assert.IsTrue(handoff.Success, handoff.Error);
         Assert.AreEqual("tab-a", handoff.Value!.TabId);
         Assert.AreEqual(first.Workstreams[0].Id, handoff.Value.WorkstreamId);
-        Assert.IsTrue((await bridge.AcknowledgeHandoffAsync(handoff.Value.CommandId, true)).Success);
+        Assert.AreEqual(WorkflowState.ReadyForChatGPT, first.Workstreams[0].CurrentState);
+        Assert.AreEqual(RelayCommandDeliveryStatus.Queued, firstCapture.Value.DeliveryStatus);
+
+        var tabBCommand = await bridge.GetNextCommandAsync("installation-a", "tab-b");
+        Assert.IsTrue(tabBCommand.Success, tabBCommand.Error);
+        Assert.IsNull(tabBCommand.Value);
+
+        var delivery = await bridge.GetNextCommandAsync("installation-a", "tab-a");
+        Assert.IsTrue(delivery.Success, delivery.Error);
+        Assert.AreEqual(handoff.Value.CommandId, delivery.Value!.CommandId);
+        Assert.AreEqual(RelayCommandDeliveryStatus.Delivering, firstCapture.Value.DeliveryStatus);
+        var duplicateDelivery = await bridge.GetNextCommandAsync("installation-a", "tab-a");
+        Assert.IsTrue(duplicateDelivery.Success, duplicateDelivery.Error);
+        Assert.IsNull(duplicateDelivery.Value);
+
+        var failedAck = await bridge.AcknowledgeHandoffAsync(delivery.Value.CommandId, false, "composer_not_found");
+        Assert.IsTrue(failedAck.Success, failedAck.Error);
+        Assert.AreEqual(WorkflowState.ReadyForChatGPT, first.Workstreams[0].CurrentState);
+        Assert.AreEqual(RelayCommandDeliveryStatus.Failed, firstCapture.Value.DeliveryStatus);
+        Assert.AreEqual("composer_not_found", firstCapture.Value.DeliveryErrorCode);
+        Assert.AreEqual("simulated result", firstCapture.Value.Result);
+
+        var retry = await bridge.QueueHandoffAsync(firstCapture.Value.Id);
+        Assert.IsTrue(retry.Success, retry.Error);
+        Assert.AreEqual(RelayCommandDeliveryStatus.Queued, firstCapture.Value.DeliveryStatus);
+        var retryDelivery = await bridge.GetNextCommandAsync("installation-a", "tab-a");
+        Assert.IsTrue(retryDelivery.Success, retryDelivery.Error);
+        Assert.AreEqual(retry.Value!.CommandId, retryDelivery.Value!.CommandId);
+        Assert.IsTrue((await bridge.AcknowledgeHandoffAsync(retryDelivery.Value.CommandId, true, null, CancellationToken.None)).Success);
         Assert.AreEqual(WorkflowState.ChatGPTReviewing, first.Workstreams[0].CurrentState);
+        Assert.AreEqual(RelayCommandDeliveryStatus.Delivered, firstCapture.Value.DeliveryStatus);
         Assert.AreEqual(WorkflowState.Idle, second.Workstreams[0].CurrentState);
     }
 

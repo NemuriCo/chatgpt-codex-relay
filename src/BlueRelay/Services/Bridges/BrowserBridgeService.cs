@@ -11,6 +11,7 @@ public sealed class BrowserBridgeService
 {
     public const int DefaultPort = 48917;
     public const int BindingTimeoutSeconds = 15;
+    public const int HandoffDeliveryTimeoutSeconds = 20;
 
     private readonly ApplicationState _state;
     private readonly ProjectService _projectService;
@@ -427,8 +428,12 @@ public sealed class BrowserBridgeService
 
             var previousResult = task.Result;
             var previousStatus = task.Status;
+            var previousDeliveryStatus = task.DeliveryStatus;
+            var previousDeliveryErrorCode = task.DeliveryErrorCode;
             task.Result = result.Trim();
             task.Status = RelayTaskStatus.ReadyForChatGPT;
+            task.DeliveryStatus = RelayCommandDeliveryStatus.None;
+            task.DeliveryErrorCode = null;
             task.UpdatedAt = DateTimeOffset.UtcNow;
             var stateResult = await _projectService.TryChangeStateAsync(
                 workstream.ProjectId,
@@ -440,6 +445,8 @@ public sealed class BrowserBridgeService
             {
                 task.Result = previousResult;
                 task.Status = previousStatus;
+                task.DeliveryStatus = previousDeliveryStatus;
+                task.DeliveryErrorCode = previousDeliveryErrorCode;
                 return Failure<RelayTask>("state_transition_failed", stateResult.Error);
             }
 
@@ -487,8 +494,38 @@ public sealed class BrowserBridgeService
                 task.WorkstreamId,
                 binding.TabId,
                 binding.ChatGPTUrl,
-                task.Result);
+                task.Result,
+                RelayCommandDeliveryStatus.Queued,
+                0,
+                null);
+            var previousDeliveryStatus = task.DeliveryStatus;
+            var previousDeliveryErrorCode = task.DeliveryErrorCode;
+            var previousCommand = _handoffCommands.TryGetValue(binding.TabKey, out var existingCommand)
+                ? existingCommand
+                : null;
+            task.DeliveryStatus = RelayCommandDeliveryStatus.Queued;
+            task.DeliveryErrorCode = null;
+            task.UpdatedAt = DateTimeOffset.UtcNow;
             _handoffCommands[binding.TabKey] = command;
+
+            var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+            if (!saveResult.Success)
+            {
+                task.DeliveryStatus = previousDeliveryStatus;
+                task.DeliveryErrorCode = previousDeliveryErrorCode;
+                if (previousCommand is null)
+                {
+                    _handoffCommands.Remove(binding.TabKey);
+                }
+                else
+                {
+                    _handoffCommands[binding.TabKey] = previousCommand;
+                }
+
+                return Failure<HandoffCommand>("persistence_failed", saveResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
             return new BridgeOperationResult<HandoffCommand>(true, command);
         }
         finally
@@ -511,9 +548,52 @@ public sealed class BrowserBridgeService
                 return Failure<HandoffCommand>("tab_not_registered", "The tab is not registered.");
             }
 
-            return _handoffCommands.TryGetValue(binding.TabKey, out var command)
-                ? new BridgeOperationResult<HandoffCommand>(true, command)
-                : new BridgeOperationResult<HandoffCommand>(true);
+            if (!_handoffCommands.TryGetValue(binding.TabKey, out var command))
+            {
+                return new BridgeOperationResult<HandoffCommand>(true);
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (command.DeliveryStatus == RelayCommandDeliveryStatus.Delivering)
+            {
+                if (command.LastAttemptAt is not { } lastAttemptAt ||
+                    now - lastAttemptAt < TimeSpan.FromSeconds(HandoffDeliveryTimeoutSeconds))
+                {
+                    return new BridgeOperationResult<HandoffCommand>(true);
+                }
+
+                var timedOutTask = FindTask(command.TaskId);
+                _handoffCommands.Remove(binding.TabKey);
+                if (timedOutTask is not null)
+                {
+                    timedOutTask.DeliveryStatus = RelayCommandDeliveryStatus.Failed;
+                    timedOutTask.DeliveryErrorCode = "delivery_timeout";
+                    timedOutTask.UpdatedAt = now;
+                    await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+                    Changed?.Invoke(this, EventArgs.Empty);
+                }
+
+                return new BridgeOperationResult<HandoffCommand>(true);
+            }
+
+            var deliveringCommand = command with
+            {
+                DeliveryStatus = RelayCommandDeliveryStatus.Delivering,
+                AttemptCount = command.AttemptCount + 1,
+                LastAttemptAt = now
+            };
+            _handoffCommands[binding.TabKey] = deliveringCommand;
+            var task = FindTask(command.TaskId);
+            if (task is not null)
+            {
+                task.DeliveryStatus = RelayCommandDeliveryStatus.Delivering;
+                task.DeliveryErrorCode = null;
+                task.UpdatedAt = now;
+                await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+                Changed?.Invoke(this, EventArgs.Empty);
+            }
+
+            return new BridgeOperationResult<HandoffCommand>(true, deliveringCommand);
         }
         finally
         {
@@ -524,6 +604,7 @@ public sealed class BrowserBridgeService
     public async Task<BridgeOperationResult<RelayTask>> AcknowledgeHandoffAsync(
         Guid commandId,
         bool success,
+        string? errorCode = null,
         CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -544,12 +625,26 @@ public sealed class BrowserBridgeService
 
             if (!success)
             {
+                task.DeliveryStatus = RelayCommandDeliveryStatus.Failed;
+                task.DeliveryErrorCode = NormalizeDeliveryErrorCode(errorCode);
+                task.UpdatedAt = DateTimeOffset.UtcNow;
                 _handoffCommands.Remove(commandEntry.Key);
+                var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+                if (!saveResult.Success)
+                {
+                    return Failure<RelayTask>("persistence_failed", saveResult.Error);
+                }
+
+                Changed?.Invoke(this, EventArgs.Empty);
                 return new BridgeOperationResult<RelayTask>(true, task);
             }
 
             var previousStatus = task.Status;
+            var previousDeliveryStatus = task.DeliveryStatus;
+            var previousDeliveryErrorCode = task.DeliveryErrorCode;
             task.Status = RelayTaskStatus.ChatGPTReviewing;
+            task.DeliveryStatus = RelayCommandDeliveryStatus.Delivered;
+            task.DeliveryErrorCode = null;
             task.UpdatedAt = DateTimeOffset.UtcNow;
             var stateResult = await _projectService.TryChangeStateAsync(
                 workstream.ProjectId,
@@ -560,6 +655,8 @@ public sealed class BrowserBridgeService
             if (!stateResult.Success)
             {
                 task.Status = previousStatus;
+                task.DeliveryStatus = previousDeliveryStatus;
+                task.DeliveryErrorCode = previousDeliveryErrorCode;
                 return Failure<RelayTask>("state_transition_failed", stateResult.Error);
             }
 
@@ -724,4 +821,9 @@ public sealed class BrowserBridgeService
     private static BridgeOperationResult Failure(string code, string message) => new(false, code, message);
 
     private static BridgeOperationResult<T> Failure<T>(string code, string message) => new(false, default, code, message);
+
+    private static string NormalizeDeliveryErrorCode(string? errorCode)
+    {
+        return string.IsNullOrWhiteSpace(errorCode) ? "injection_failed" : errorCode.Trim();
+    }
 }

@@ -35,4 +35,8 @@ public sealed class RelayTask
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public RelayTaskStatus Status { get; set; } = RelayTaskStatus.Captured;
+
+    public RelayCommandDeliveryStatus DeliveryStatus { get; set; } = RelayCommandDeliveryStatus.None;
+
+    public string? DeliveryErrorCode { get; set; }
 }

@@ -48,7 +48,20 @@ public sealed class JsonStateStoreTests
                     LocalPath = "C:\\Second",
                     Workstreams = [new Workstream { Id = Guid.NewGuid(), ProjectId = secondId, Name = "Second line", CurrentState = WorkflowState.CodexRunning }]
                 }
-            ]
+            ],
+            BrowserBridge = new BrowserBridgeState
+            {
+                Tasks =
+                [
+                    new RelayTask
+                    {
+                        WorkstreamId = firstId,
+                        Result = "result",
+                        DeliveryStatus = RelayCommandDeliveryStatus.Failed,
+                        DeliveryErrorCode = "composer_not_found"
+                    }
+                ]
+            }
         };
 
         await store.SaveAsync(state);
@@ -58,6 +71,8 @@ public sealed class JsonStateStoreTests
         Assert.AreEqual(2, result.State.Projects.Count);
         Assert.AreEqual(WorkflowState.ReadyForChatGPT, result.State.Projects.Single(project => project.Id == firstId).Workstreams[0].CurrentState);
         Assert.AreEqual(WorkflowState.CodexRunning, result.State.Projects.Single(project => project.Id == secondId).Workstreams[0].CurrentState);
+        Assert.AreEqual(RelayCommandDeliveryStatus.Failed, result.State.BrowserBridge.Tasks[0].DeliveryStatus);
+        Assert.AreEqual("composer_not_found", result.State.BrowserBridge.Tasks[0].DeliveryErrorCode);
     }
 
     [TestMethod]
