@@ -104,9 +104,10 @@ public sealed class CodexAppServerBridge : ICodexBridge
         CodexTaskRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (!Directory.Exists(request.Project.LocalPath))
+        var workingDirectory = ResolveWorkingDirectory(request.Project.LocalPath);
+        if (!Directory.Exists(workingDirectory))
         {
-            return Failure($"Project directory does not exist: {request.Project.LocalPath}");
+            return Failure($"Project directory does not exist: {workingDirectory}", errorCode: "codex_project_directory_missing");
         }
 
         var gate = _workstreamGates.GetOrAdd(request.Workstream.Id, static _ => new SemaphoreSlim(1, 1));
@@ -119,13 +120,27 @@ public sealed class CodexAppServerBridge : ICodexBridge
             {
                 protocol = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
                 SetError(null);
-                threadId = await EnsureThreadAsync(protocol, request, cancellationToken).ConfigureAwait(false);
+                threadId = await EnsureThreadAsync(protocol, request, workingDirectory, cancellationToken).ConfigureAwait(false);
             }
             catch (CodexThreadConflictException exception)
             {
                 var error = exception.Message;
                 SetError(error);
                 return Failure(error, exception.ThreadId, errorCode: "codex_thread_conflict");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var error = FormatFailure(exception);
+                SetError(error);
+                var hasExistingThread = !string.IsNullOrWhiteSpace(request.Workstream.CodexThreadId);
+                var errorCode = hasExistingThread
+                    ? ClassifyThreadResumeFailure(exception)
+                    : "codex_thread_start_failed";
+                return Failure(error, request.Workstream.CodexThreadId, errorCode: errorCode);
             }
 
             var active = new ActiveTurn(request.Workstream.Id, threadId);
@@ -165,7 +180,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
             {
                 var error = FormatFailure(exception);
                 SetError(error);
-                active.Completion.TrySetResult(Failure(error, threadId, active.TurnId));
+                active.Completion.TrySetResult(Failure(error, threadId, active.TurnId, "codex_turn_failed"));
                 return await active.Completion.Task.ConfigureAwait(false);
             }
             finally
@@ -383,6 +398,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
     private async Task<string> EnsureThreadAsync(
         CodexProtocolClient protocol,
         CodexTaskRequest request,
+        string workingDirectory,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(request.Workstream.CodexThreadId))
@@ -413,10 +429,17 @@ public sealed class CodexAppServerBridge : ICodexBridge
             SetStage("thread_resume");
             try
             {
-                await protocol.RequestAsync(
+                var resumeResponse = await protocol.RequestAsync(
                     "thread/resume",
-                    new { threadId = existingThreadId, cwd = request.Project.LocalPath },
+                    new { threadId = existingThreadId, cwd = workingDirectory },
                     cancellationToken).ConfigureAwait(false);
+                var resumedThreadId = ReadString(resumeResponse, "thread", "id");
+                if (!string.IsNullOrWhiteSpace(resumedThreadId) &&
+                    !string.Equals(resumedThreadId, existingThreadId, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        $"Codex App Server returned thread {resumedThreadId} while resuming {existingThreadId}.");
+                }
             }
             catch (CodexProtocolException exception) when (IsActiveWriterConflict(exception))
             {
@@ -438,11 +461,10 @@ public sealed class CodexAppServerBridge : ICodexBridge
             "thread/start",
             new
             {
-                cwd = request.Project.LocalPath,
+                cwd = workingDirectory,
                 approvalPolicy = "on-request",
                 approvalsReviewer = "user",
-                sandbox = "workspace-write",
-                threadSource = "bluerelay"
+                sandbox = "workspace-write"
             },
             cancellationToken).ConfigureAwait(false);
         var threadId = ReadString(response, "thread", "id");
@@ -547,7 +569,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
                         {
                             SetError(serverError);
                             active.Completion.TrySetResult(
-                                Failure(serverError, active.ThreadId, active.TurnId));
+                                Failure(serverError, active.ThreadId, active.TurnId, "codex_turn_failed"));
                         }
                     }
                 }
@@ -579,7 +601,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
 
                     active.Completion.TrySetResult(
                         failed
-                            ? Failure(error ?? "Codex turn failed.", active.ThreadId, active.TurnId)
+                            ? Failure(error ?? "Codex turn failed.", active.ThreadId, active.TurnId, "codex_turn_failed")
                             : new CodexTurnResult(true, active.ThreadId, active.TurnId, result, null, false));
                 }
 
@@ -646,7 +668,7 @@ public sealed class CodexAppServerBridge : ICodexBridge
         SetError(error);
         foreach (var active in _activeTurns.Values)
         {
-            active.Completion.TrySetResult(Failure(error, active.ThreadId, active.TurnId));
+            active.Completion.TrySetResult(Failure(error, active.ThreadId, active.TurnId, "codex_app_server_disconnected"));
         }
 
         var protocol = Interlocked.Exchange(ref _protocol, null);
@@ -871,6 +893,48 @@ public sealed class CodexAppServerBridge : ICodexBridge
     {
         return exception.Message.Contains("already has an active writer", StringComparison.OrdinalIgnoreCase) ||
                exception.Error.GetRawText().Contains("already has an active writer", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ClassifyThreadResumeFailure(Exception exception)
+    {
+        var message = exception is CodexProtocolException protocolException
+            ? $"{protocolException.Message} {protocolException.Error.GetRawText()}"
+            : exception.Message;
+        return message.Contains("archiv", StringComparison.OrdinalIgnoreCase)
+            ? "codex_thread_archived"
+            : "codex_thread_resume_failed";
+    }
+
+    private static string ResolveWorkingDirectory(string projectPath)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return string.Empty;
+        }
+
+        string normalizedPath;
+        try
+        {
+            normalizedPath = new DirectoryInfo(projectPath.Trim()).FullName;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return projectPath.Trim();
+        }
+
+        var current = new DirectoryInfo(normalizedPath);
+        while (current is not null)
+        {
+            var gitMarker = Path.Combine(current.FullName, ".git");
+            if (Directory.Exists(gitMarker) || File.Exists(gitMarker))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        return normalizedPath;
     }
 
     private static CodexTurnResult Failure(

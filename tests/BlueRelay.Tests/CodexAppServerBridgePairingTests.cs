@@ -68,6 +68,42 @@ public sealed class CodexAppServerBridgePairingTests
         StringAssert.Contains(result.Error, "another process");
     }
 
+    [TestMethod]
+    public async Task ArchivedThreadReturnsActionableCodeAndKeepsPersistedThread()
+    {
+        var fixture = CreateFixture();
+        fixture.Workstream.CodexThreadId = "thread-archived";
+        fixture.Workstream.CodexSessionId = "thread-archived";
+        var factory = new FakeProcessFactory { ResumeError = "thread is archived" };
+        var bridge = new CodexAppServerBridge(fixture.State, new FakeExecutableLocator(), _ => factory.Create());
+
+        var result = await bridge.SubmitTaskAsync(fixture.Request("archived"));
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual("codex_thread_archived", result.ErrorCode);
+        Assert.AreEqual("thread-archived", result.ThreadId);
+        Assert.AreEqual("thread-archived", fixture.Workstream.CodexThreadId);
+        Assert.AreEqual(1, factory.Processes.Single().Methods.Count(method => method == "thread/resume"));
+        Assert.AreEqual(0, factory.Processes.Single().Methods.Count(method => method == "turn/start"));
+    }
+
+    [TestMethod]
+    public async Task NewThreadUsesGitRootAndDoesNotSendCustomThreadSource()
+    {
+        var fixture = CreateFixture();
+        fixture.Project.LocalPath = Directory.GetCurrentDirectory();
+        var factory = new FakeProcessFactory();
+        var bridge = new CodexAppServerBridge(fixture.State, new FakeExecutableLocator(), _ => factory.Create());
+
+        var result = await bridge.SubmitTaskAsync(fixture.Request("cwd"));
+
+        Assert.IsTrue(result.Success, result.Error);
+        Assert.AreEqual(result.ThreadId, fixture.Workstream.CodexThreadId);
+        var process = factory.Processes.Single();
+        Assert.AreEqual(FindGitRoot(Directory.GetCurrentDirectory()), process.ThreadStartCwd);
+        Assert.IsFalse(process.ThreadStartParams?.TryGetProperty("threadSource", out _) == true);
+    }
+
     private static Fixture CreateFixture()
     {
         var state = new ApplicationState();
@@ -94,6 +130,24 @@ public sealed class CodexAppServerBridgePairingTests
         Assert.IsTrue(condition(), "Condition did not become true in time.");
     }
 
+    private static string FindGitRoot(string path)
+    {
+        var current = new DirectoryInfo(path);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, ".git")) ||
+                File.Exists(Path.Combine(current.FullName, ".git")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        Assert.Fail($"Could not find the Git root for {path}.");
+        return string.Empty;
+    }
+
     private sealed record Fixture(ApplicationState State, Project Project, Workstream Workstream)
     {
         public CodexTaskRequest Request(string prompt)
@@ -115,11 +169,13 @@ public sealed class CodexAppServerBridgePairingTests
     {
         public bool ResumeConflict { get; init; }
 
+        public string? ResumeError { get; init; }
+
         public List<FakeProcess> Processes { get; } = [];
 
         public FakeProcess Create()
         {
-            var process = new FakeProcess(Processes.Count + 1, ResumeConflict);
+            var process = new FakeProcess(Processes.Count + 1, ResumeConflict, ResumeError);
             Processes.Add(process);
             return process;
         }
@@ -130,13 +186,15 @@ public sealed class CodexAppServerBridgePairingTests
         private readonly Channel<string> _outputLines = Channel.CreateUnbounded<string>();
         private readonly FakeInput _input;
         private readonly bool _resumeConflict;
+        private readonly string? _resumeError;
         private int _threadNumber;
         private bool _stopped;
 
-        public FakeProcess(int processId, bool resumeConflict)
+        public FakeProcess(int processId, bool resumeConflict, string? resumeError)
         {
             ProcessId = processId;
             _resumeConflict = resumeConflict;
+            _resumeError = resumeError;
             _input = new FakeInput(HandleRequest);
         }
 
@@ -149,6 +207,13 @@ public sealed class CodexAppServerBridgePairingTests
         public int? ExitCode { get; private set; }
 
         public List<string> Methods { get; } = [];
+
+        public JsonElement? ThreadStartParams { get; private set; }
+
+        public string? ThreadStartCwd => ThreadStartParams is { } parameters &&
+                                         parameters.TryGetProperty("cwd", out var cwd)
+            ? cwd.GetString()
+            : null;
 
         public event EventHandler<CodexProcessExit>? Exited;
 
@@ -192,16 +257,22 @@ public sealed class CodexAppServerBridgePairingTests
                     Respond(idText, new { userAgent = "fake-codex" });
                     break;
                 case "thread/start":
+                    ThreadStartParams = root.GetProperty("params").Clone();
                     Respond(idText, new { thread = new { id = $"thread-{++_threadNumber}" } });
                     break;
                 case "thread/resume":
-                    if (_resumeConflict)
+                    if (_resumeError is not null)
+                    {
+                        Error(idText, _resumeError);
+                    }
+                    else if (_resumeConflict)
                     {
                         Error(idText, "thread already has an active writer");
                     }
                     else
                     {
-                        Respond(idText, new { thread = new { id = "thread-resumed" } });
+                        var resumedThreadId = root.GetProperty("params").GetProperty("threadId").GetString()!;
+                        Respond(idText, new { thread = new { id = resumedThreadId } });
                     }
 
                     break;

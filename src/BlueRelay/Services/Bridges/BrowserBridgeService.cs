@@ -625,7 +625,13 @@ public sealed class BrowserBridgeService
         }
         catch (Exception exception)
         {
-            codexResult = new CodexTurnResult(false, workstream!.CodexThreadId, task.CodexTurnId, null, exception.Message);
+            codexResult = new CodexTurnResult(
+                false,
+                workstream!.CodexThreadId,
+                task.CodexTurnId,
+                null,
+                exception.Message,
+                ErrorCode: "codex_bridge_failed");
         }
 
         await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -674,13 +680,16 @@ public sealed class BrowserBridgeService
                     currentTask.Status = RelayTaskStatus.Error;
                     currentTask.CodexError = stateResult.Error;
                     currentWorkstream.CodexError = stateResult.Error;
+                    currentWorkstream.CodexErrorCode = "codex_state_transition_failed";
+                    currentWorkstream.CurrentState = WorkflowState.Error;
+                    currentWorkstream.UpdatedAt = DateTimeOffset.UtcNow;
                 }
             }
             else
             {
                 currentTask.Status = RelayTaskStatus.Error;
                 currentTask.UpdatedAt = DateTimeOffset.UtcNow;
-                var targetState = codexResult.ErrorCode == "codex_thread_conflict" || codexResult.Cancelled
+                var targetState = RequiresCodexAttention(codexResult)
                     ? WorkflowState.NeedsAttention
                     : WorkflowState.Error;
                 var stateResult = await _projectService.TryChangeStateAsync(
@@ -692,6 +701,7 @@ public sealed class BrowserBridgeService
                 if (!stateResult.Success)
                 {
                     currentWorkstream.CurrentState = targetState;
+                    currentWorkstream.UpdatedAt = DateTimeOffset.UtcNow;
                 }
             }
 
@@ -1558,6 +1568,14 @@ public sealed class BrowserBridgeService
     private static string NormalizeDeliveryErrorCode(string? errorCode)
     {
         return string.IsNullOrWhiteSpace(errorCode) ? "injection_failed" : errorCode.Trim();
+    }
+
+    private static bool RequiresCodexAttention(CodexTurnResult result)
+    {
+        return result.Cancelled || result.ErrorCode is
+            "codex_thread_conflict" or
+            "codex_thread_archived" or
+            "codex_thread_resume_failed";
     }
 
     private void HydratePayloads()

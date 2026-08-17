@@ -7,7 +7,7 @@ namespace BlueRelay.Tests;
 public sealed class CodexAppServerSmokeTests
 {
     [TestMethod]
-    public async Task ReadOnlyAppServerSmokeCanRunWhenExplicitlyEnabled()
+    public async Task AppServerSmokeCanRunWhenExplicitlyEnabled()
     {
         if (!string.Equals(Environment.GetEnvironmentVariable("BLUERELAY_RUN_CODEX_SMOKE"), "1", StringComparison.Ordinal))
         {
@@ -53,8 +53,7 @@ public sealed class CodexAppServerSmokeTests
                 cwd = Environment.CurrentDirectory,
                 approvalPolicy = "on-request",
                 approvalsReviewer = "user",
-                sandbox = "read-only",
-                threadSource = "bluerelay-smoke-test"
+                sandbox = "read-only"
             });
         var threadId = thread.GetProperty("thread").GetProperty("id").GetString();
         Assert.IsFalse(string.IsNullOrWhiteSpace(threadId));

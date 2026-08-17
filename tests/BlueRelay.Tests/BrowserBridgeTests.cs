@@ -4,6 +4,7 @@ using BlueRelay.Models;
 using BlueRelay.Persistence;
 using BlueRelay.Services;
 using BlueRelay.Services.Bridges;
+using BlueRelay.Services.Codex;
 
 namespace BlueRelay.Tests;
 
@@ -334,6 +335,43 @@ public sealed class BrowserBridgeTests
         await Assert.ThrowsExceptionAsync<HttpRequestException>(() => client.GetAsync($"http://127.0.0.1:{port}/v1/health/no-longer-running"));
     }
 
+    [TestMethod]
+    public async Task CodexThreadFailureLeavesWorkstreamOutOfRunning()
+    {
+        var state = new ApplicationState();
+        var projectService = new ProjectService(state, new MemoryStateStore(), new WorkflowStateMachine());
+        var codex = new FakeCodexBridge(new CodexTurnResult(
+            false,
+            "thread-archived",
+            null,
+            null,
+            "Codex thread is archived.",
+            ErrorCode: "codex_thread_archived"));
+        var bridge = new BrowserBridgeService(state, projectService, codex);
+        var project = (await projectService.TryCreateAsync("Codex failure", _testDirectory)).Project!;
+        var workstream = project.Workstreams[0];
+        workstream.CurrentState = WorkflowState.ReadyForCodex;
+        workstream.CurrentTaskId = Guid.NewGuid().ToString("D");
+        var task = new RelayTask
+        {
+            Id = Guid.Parse(workstream.CurrentTaskId),
+            WorkstreamId = workstream.Id,
+            Prompt = "resume archived thread",
+            Status = RelayTaskStatus.Captured
+        };
+        state.BrowserBridge.Tasks.Add(task);
+
+        var result = await bridge.SendTaskToCodexAsync(task.Id);
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual("codex_thread_archived", result.ErrorCode);
+        Assert.AreEqual(WorkflowState.NeedsAttention, workstream.CurrentState);
+        Assert.AreNotEqual(WorkflowState.CodexRunning, workstream.CurrentState);
+        Assert.AreEqual(CodexBridgeStatus.Connected, codex.Status);
+        Assert.AreEqual(RelayTaskStatus.Error, task.Status);
+        Assert.AreEqual("codex_thread_archived", workstream.CodexErrorCode);
+    }
+
     private static async Task RegisterAndBindAsync(BrowserBridgeService bridge, string tabId, Guid workstreamId)
     {
         var register = await bridge.RegisterTabAsync(new RegisterTabRequest(
@@ -372,5 +410,55 @@ public sealed class BrowserBridgeTests
             Task.FromResult(new StateLoadResult(new ApplicationState(), null));
 
         public Task SaveAsync(ApplicationState state, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class FakeCodexBridge : ICodexBridge
+    {
+        private readonly CodexTurnResult _result;
+
+        public FakeCodexBridge(CodexTurnResult result)
+        {
+            _result = result;
+            _ = ProgressChanged;
+            _ = ApprovalRequested;
+            _ = ThreadChanged;
+            _ = StatusChanged;
+            _ = DiagnosticsChanged;
+        }
+
+        public CodexBridgeStatus Status => CodexBridgeStatus.Connected;
+
+        public string? Version => "fake";
+
+        public string? ErrorMessage => null;
+
+        public CodexDiagnosticSnapshot Diagnostics => new(null, Version, null, null, "test", null, []);
+
+        public event EventHandler<CodexProgressUpdate>? ProgressChanged;
+
+        public event EventHandler<CodexApprovalRequest>? ApprovalRequested;
+
+        public event EventHandler<CodexThreadUpdate>? ThreadChanged;
+
+        public event EventHandler? StatusChanged;
+
+        public event EventHandler? DiagnosticsChanged;
+
+        public Task<CodexTurnResult> SubmitTaskAsync(CodexTaskRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_result);
+
+        public Task<bool> InterruptAsync(string threadId, string turnId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task RespondToApprovalAsync(
+            string requestId,
+            string method,
+            bool approved,
+            System.Text.Json.JsonElement? parameters = null,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task ResetThreadAsync(Workstream workstream, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }
