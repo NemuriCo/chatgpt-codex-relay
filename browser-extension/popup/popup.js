@@ -44,7 +44,9 @@
       return;
     }
 
-    $("tabTitle").textContent = activeTab.title || activeTab.url;
+    const tabTitle = activeTab.title || activeTab.url;
+    $("tabTitle").textContent = tabTitle;
+    $("tabTitle").title = tabTitle;
     if (!health.data.paired) {
       show("pairing", true);
       return;
