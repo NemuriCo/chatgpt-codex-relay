@@ -8,13 +8,13 @@
         Width="378"
         Height="320"
         MinWidth="360"
-        MaxWidth="410"
+        MaxWidth="800"
         MinHeight="0"
-        MaxHeight="680"
-        SizeToContent="Height"
+        MaxHeight="900"
+        SizeToContent="Manual"
         WindowStartupLocation="Manual"
         WindowStyle="None"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         AllowsTransparency="False"
         Background="Transparent"
         Foreground="#F4F5F7"
@@ -22,12 +22,13 @@
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         Loaded="Window_Loaded"
+        SizeChanged="Window_SizeChanged"
         LocationChanged="Window_LocationChanged"
         SourceInitialized="Window_SourceInitialized"
         PreviewMouseLeftButtonUp="Window_PreviewMouseLeftButtonUp"
         Closing="Window_Closing">
     <shell:WindowChrome.WindowChrome>
-        <shell:WindowChrome CaptionHeight="42" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="14" UseAeroCaptionButtons="False" />
+        <shell:WindowChrome CaptionHeight="42" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="14" UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
     <Border BorderBrush="#344255" BorderThickness="1" CornerRadius="14" Background="#12161D">
         <Border.Effect>
@@ -36,7 +37,7 @@
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
             <Grid Grid.Row="0" MinHeight="44" Margin="14,0,12,0" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
@@ -65,7 +66,7 @@
 
             <Grid Grid.Row="1" Margin="12,0,12,12" Visibility="{Binding IsCollapsed, Converter={StaticResource InverseBoolToVisibility}}">
                 <Grid Visibility="{Binding IsProjectManagementOpen, Converter={StaticResource InverseBoolToVisibility}}">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="600">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel>
                             <StackPanel Margin="2,6,2,10"><TextBlock Text="{Binding Ui.Workflow}" FontSize="17" FontWeight="SemiBold" /><TextBlock Text="{Binding Ui.WorkflowSubtitle}" Foreground="#8E9AAC" FontSize="10" Margin="0,3,0,0" /></StackPanel>
                             <ItemsControl ItemsSource="{Binding Workstreams}" Visibility="{Binding HasWorkstreams, Converter={StaticResource BoolToVisibility}}">
@@ -85,7 +86,20 @@
                                                 <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0"><ui:SymbolIcon Symbol="{Binding StatusIcon}" Foreground="{Binding StatusBrush}" FontSize="15" VerticalAlignment="Center" Margin="0,0,6,0" /><TextBlock Text="{Binding StatusLabel}" Foreground="{Binding StatusBrush}" FontSize="11" FontWeight="SemiBold" /></StackPanel>
                                                 <TextBlock Grid.Row="2" Text="{Binding Guidance}" Foreground="#B7C2D1" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0" />
                                                 <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0"><Ellipse Width="6" Height="6" Fill="{Binding BrowserConnectionBrush}" VerticalAlignment="Center" Margin="0,0,5,0" /><TextBlock Text="{Binding BrowserConnectionText}" Foreground="#9BA8B8" FontSize="9" /></StackPanel>
-                                                <ui:Card Grid.Row="4" Grid.ColumnSpan="2" Padding="8" Margin="0,10,0,0" Background="#202A36" Visibility="{Binding HasCurrentTask, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="{Binding CurrentTaskText}" Foreground="#DCE5EE" FontSize="10" TextWrapping="Wrap" MaxHeight="56" /><TextBlock Text="{Binding CurrentTaskResult}" Foreground="#9ED4C0" FontSize="10" TextWrapping="Wrap" MaxHeight="48" Margin="0,6,0,0" Visibility="{Binding HasCurrentResult, Converter={StaticResource BoolToVisibility}}" /></StackPanel></ui:Card>
+                                                <ui:Card Grid.Row="4" Grid.ColumnSpan="2" Padding="8" Margin="0,10,0,0" Background="#202A36" Visibility="{Binding HasCurrentTask, Converter={StaticResource BoolToVisibility}}">
+                                                    <StackPanel>
+                                                        <Grid Margin="0,0,0,5">
+                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding DataContext.Ui.CurrentTask, Source={x:Reference RootWindow}}" Foreground="#8E9AAC" FontSize="9" VerticalAlignment="Center" />
+                                                            <ui:Button Grid.Column="1" Content="{Binding DataContext.Ui.Expand, Source={x:Reference RootWindow}}" Appearance="Secondary" Padding="8,2" Height="24" Command="{Binding DataContext.OpenTaskDetailCommand, Source={x:Reference RootWindow}}" CommandParameter="{Binding}" />
+                                                        </Grid>
+                                                        <TextBox Text="{Binding CurrentTaskText, Mode=OneWay}" Foreground="#DCE5EE" Background="#151C25" BorderBrush="#344255" BorderThickness="1" FontSize="10" TextWrapping="Wrap" AcceptsReturn="True" IsReadOnly="True" MinHeight="32" MaxHeight="100" Padding="6" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PreviewMouseWheel="TaskTextBox_PreviewMouseWheel" />
+                                                        <StackPanel Margin="0,7,0,0" Visibility="{Binding HasCurrentResult, Converter={StaticResource BoolToVisibility}}">
+                                                            <TextBlock Text="{Binding DataContext.Ui.TaskResult, Source={x:Reference RootWindow}}" Foreground="#8E9AAC" FontSize="9" Margin="0,0,0,4" />
+                                                            <TextBox Text="{Binding CurrentTaskResult, Mode=OneWay}" Foreground="#9ED4C0" Background="#151C25" BorderBrush="#344255" BorderThickness="1" FontSize="10" TextWrapping="Wrap" AcceptsReturn="True" IsReadOnly="True" MinHeight="32" MaxHeight="100" Padding="6" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PreviewMouseWheel="TaskTextBox_PreviewMouseWheel" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </ui:Card>
                                                 <StackPanel Grid.Row="5" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,9,0,0"><ui:Button Content="{Binding DataContext.Ui.SendToCodex, Source={x:Reference RootWindow}}" Appearance="Primary" Icon="{ui:SymbolIcon ArrowRight16}" Command="{Binding DataContext.ConfirmTaskCommand, Source={x:Reference RootWindow}}" CommandParameter="{Binding}" Visibility="{Binding CanSendToCodex, Converter={StaticResource BoolToVisibility}}" /><ui:Button Content="{Binding DataContext.Ui.SendToChatGPT, Source={x:Reference RootWindow}}" Appearance="Primary" Icon="{ui:SymbolIcon ArrowLeft12}" Command="{Binding DataContext.HandoffResultCommand, Source={x:Reference RootWindow}}" CommandParameter="{Binding}" Visibility="{Binding CanSendToChatGPT, Converter={StaticResource BoolToVisibility}}" Margin="6,0,0,0" /><TextBlock Text="{Binding StatusLabel}" Foreground="#82BFE2" FontSize="10" VerticalAlignment="Center" Visibility="{Binding IsCodexRunning, Converter={StaticResource BoolToVisibility}}" /><TextBlock Text="{Binding StatusLabel}" Foreground="#CBB7E9" FontSize="10" VerticalAlignment="Center" Visibility="{Binding IsChatGPTReviewing, Converter={StaticResource BoolToVisibility}}" /></StackPanel>
                                             </Grid>
                                         </ui:Card>
@@ -114,6 +128,32 @@
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>
+            </Grid>
+
+            <Grid Grid.RowSpan="2" Panel.ZIndex="20" Margin="12" Visibility="{Binding IsTaskDetailOpen, Converter={StaticResource BoolToVisibility}}">
+                <Border Background="#E612161D" BorderBrush="#46566B" BorderThickness="1" CornerRadius="12" Padding="12" VerticalAlignment="Center" MaxHeight="640">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Ui.CurrentTask}" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding TaskDetailWorkstream.WorkstreamName}" Foreground="#8E9AAC" FontSize="10" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <ui:Button Grid.Column="1" Width="30" Height="28" Padding="0" Appearance="Secondary" Command="{Binding CloseTaskDetailCommand}" ToolTip="{Binding Ui.Close}" Icon="{ui:SymbolIcon Dismiss16}" />
+                        </Grid>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="590">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Ui.TaskPrompt}" Foreground="#8E9AAC" FontSize="9" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding TaskDetailPrompt, Mode=OneWay}" Foreground="#DCE5EE" Background="#151C25" BorderBrush="#344255" BorderThickness="1" FontSize="10" TextWrapping="Wrap" AcceptsReturn="True" IsReadOnly="True" MinHeight="72" MaxHeight="260" Padding="7" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PreviewMouseWheel="TaskTextBox_PreviewMouseWheel" />
+                                <StackPanel Margin="0,10,0,0" Visibility="{Binding HasTaskDetailResult, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="{Binding Ui.TaskResult}" Foreground="#8E9AAC" FontSize="9" Margin="0,0,0,4" />
+                                    <TextBox Text="{Binding TaskDetailResult, Mode=OneWay}" Foreground="#9ED4C0" Background="#151C25" BorderBrush="#344255" BorderThickness="1" FontSize="10" TextWrapping="Wrap" AcceptsReturn="True" IsReadOnly="True" MinHeight="72" MaxHeight="260" Padding="7" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PreviewMouseWheel="TaskTextBox_PreviewMouseWheel" />
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
             </Grid>
         </Grid>
     </Border>

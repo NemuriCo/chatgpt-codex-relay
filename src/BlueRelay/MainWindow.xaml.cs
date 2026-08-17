@@ -1,11 +1,15 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using BlueRelay.Diagnostics;
 using BlueRelay.Presentation.ViewModels;
 using FormsScreen = System.Windows.Forms.Screen;
+using WpfTextBox = System.Windows.Controls.TextBox;
 
 namespace BlueRelay;
 
@@ -13,15 +17,23 @@ public partial class MainWindow : Window
 {
     private const double SnapDistance = 20;
     private const double CollapsedHeight = 50;
+    private const double DefaultWindowWidth = 378;
+    private const double DefaultWindowHeight = 320;
+    private const double MinimumExpandedHeight = 180;
+    private const double MaximumWindowWidth = 800;
+    private const double MaximumWindowHeight = 900;
     private const int DwmWindowCornerPreference = 33;
     private const int DwmCornerRound = 2;
     private bool _allowClose;
     private bool _isRestoringPosition;
     private MainViewModel? _viewModel;
+    private readonly DispatcherTimer _windowSettingsSaveTimer;
 
     public MainWindow()
     {
         InitializeComponent();
+        _windowSettingsSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _windowSettingsSaveTimer.Tick += WindowSettingsSaveTimer_Tick;
     }
 
     public void ShowFromTray()
@@ -40,6 +52,7 @@ public partial class MainWindow : Window
         }
 
         viewModel.UpdateWindowPosition(Left, Top);
+        viewModel.UpdateWindowSize(Width, Height);
         await viewModel.SaveWindowSettingsAsync();
     }
 
@@ -65,9 +78,10 @@ public partial class MainWindow : Window
             _isRestoringPosition = true;
             try
             {
+                ApplyWindowSizeLimits(GetCurrentWorkingArea());
                 ApplyCollapsedLayout(viewModel.IsCollapsed);
                 UpdateLayout();
-                if (viewModel.WindowLeft.HasValue && viewModel.WindowTop.HasValue && IsPositionVisible(viewModel.WindowLeft.Value, viewModel.WindowTop.Value))
+                if (viewModel.WindowLeft.HasValue && viewModel.WindowTop.HasValue)
                 {
                     Left = viewModel.WindowLeft.Value;
                     Top = viewModel.WindowTop.Value;
@@ -77,7 +91,11 @@ public partial class MainWindow : Window
                     SetDefaultPosition();
                 }
 
+                ApplyWindowSizeLimits(GetWorkingAreaForBounds(Left, Top, ActualWidth, ActualHeight));
+                RestoreExpandedSize(viewModel);
+                ClampWindowToWorkingArea();
                 viewModel.UpdateWindowPosition(Left, Top);
+                viewModel.UpdateWindowSize(Width, Height);
             }
             finally
             {
@@ -94,6 +112,29 @@ public partial class MainWindow : Window
         {
             ApplyCollapsedLayout(_viewModel.IsCollapsed);
         }
+    }
+
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_isRestoringPosition || _viewModel is null || _viewModel.IsCollapsed)
+        {
+            return;
+        }
+
+        _viewModel.UpdateWindowSize(Width, Height);
+        ScheduleWindowSettingsSave();
+    }
+
+    private void ScheduleWindowSettingsSave()
+    {
+        _windowSettingsSaveTimer.Stop();
+        _windowSettingsSaveTimer.Start();
+    }
+
+    private async void WindowSettingsSaveTimer_Tick(object? sender, EventArgs e)
+    {
+        _windowSettingsSaveTimer.Stop();
+        await SaveWindowSettingsAsync();
     }
 
     private void Window_LocationChanged(object? sender, EventArgs e)
@@ -154,12 +195,7 @@ public partial class MainWindow : Window
 
     private void HideToTray()
     {
-        if (DataContext is MainViewModel viewModel)
-        {
-            viewModel.UpdateWindowPosition(Left, Top);
-            _ = viewModel.SaveWindowSettingsAsync();
-        }
-
+        _ = SaveWindowSettingsAsync();
         Hide();
     }
 
@@ -172,15 +208,108 @@ public partial class MainWindow : Window
 
     private void ApplyCollapsedLayout(bool isCollapsed)
     {
-        if (isCollapsed)
+        var wasRestoringPosition = _isRestoringPosition;
+        _isRestoringPosition = true;
+        try
         {
-            SizeToContent = SizeToContent.Manual;
-            Height = CollapsedHeight;
+            if (isCollapsed)
+            {
+                SizeToContent = SizeToContent.Manual;
+                ResizeMode = ResizeMode.NoResize;
+                MinHeight = 0;
+                Height = CollapsedHeight;
+            }
+            else
+            {
+                SizeToContent = SizeToContent.Manual;
+                ResizeMode = ResizeMode.CanResize;
+                MinHeight = MinimumExpandedHeight;
+                if (_viewModel is not null)
+                {
+                    RestoreExpandedSize(_viewModel);
+                }
+            }
         }
-        else
+        finally
         {
-            SizeToContent = SizeToContent.Height;
+            _isRestoringPosition = wasRestoringPosition;
         }
+    }
+
+    private void ApplyWindowSizeLimits(Rect workArea)
+    {
+        MinWidth = Math.Min(360, workArea.Width);
+        MaxWidth = Math.Max(MinWidth, Math.Min(MaximumWindowWidth, workArea.Width));
+        MaxHeight = Math.Max(MinimumExpandedHeight, Math.Min(MaximumWindowHeight, workArea.Height));
+    }
+
+    private void RestoreExpandedSize(MainViewModel viewModel)
+    {
+        if (viewModel.IsCollapsed)
+        {
+            return;
+        }
+
+        Width = Clamp(viewModel.WindowWidth ?? DefaultWindowWidth, MinWidth, MaxWidth);
+        Height = Clamp(viewModel.WindowHeight ?? DefaultWindowHeight, MinHeight, MaxHeight);
+    }
+
+    private void ClampWindowToWorkingArea()
+    {
+        var workArea = GetWorkingAreaForBounds(Left, Top, ActualWidth, ActualHeight);
+        if (!IsCollapsedWindow() && ActualWidth > workArea.Width)
+        {
+            Width = workArea.Width;
+        }
+
+        if (!IsCollapsedWindow() && ActualHeight > workArea.Height)
+        {
+            Height = workArea.Height;
+        }
+
+        Left = Math.Clamp(Left, workArea.Left, workArea.Right - ActualWidth);
+        Top = Math.Clamp(Top, workArea.Top, workArea.Bottom - ActualHeight);
+    }
+
+    private Rect GetWorkingAreaForBounds(double left, double top, double width, double height)
+    {
+        var bounds = new Rect(left, top, Math.Max(width, 1), Math.Max(height, 1));
+        Rect? bestArea = null;
+        var bestIntersection = 0d;
+        foreach (var workArea in GetWorkingAreas())
+        {
+            var intersection = Rect.Intersect(bounds, workArea);
+            var area = intersection.IsEmpty ? 0 : intersection.Width * intersection.Height;
+            if (area > bestIntersection)
+            {
+                bestArea = workArea;
+                bestIntersection = area;
+            }
+        }
+
+        return bestArea ?? GetCurrentWorkingArea();
+    }
+
+    private IEnumerable<Rect> GetWorkingAreas()
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = 96 / dpi.PixelsPerInchX;
+        var scaleY = 96 / dpi.PixelsPerInchY;
+        foreach (var screen in FormsScreen.AllScreens)
+        {
+            var area = screen.WorkingArea;
+            yield return new Rect(area.Left * scaleX, area.Top * scaleY, area.Width * scaleX, area.Height * scaleY);
+        }
+    }
+
+    private bool IsCollapsedWindow()
+    {
+        return _viewModel?.IsCollapsed == true;
+    }
+
+    private static double Clamp(double value, double minimum, double maximum)
+    {
+        return Math.Max(minimum, Math.Min(maximum, value));
     }
 
     private void SnapToScreenEdge()
@@ -224,24 +353,43 @@ public partial class MainWindow : Window
         return new Rect(area.Left * scaleX, area.Top * scaleY, area.Width * scaleX, area.Height * scaleY);
     }
 
-    private bool IsPositionVisible(double left, double top)
+    private void TaskTextBox_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        var right = left + Math.Max(Width, 1);
-        var bottom = top + Math.Max(ActualHeight, 1);
-        foreach (var screen in FormsScreen.AllScreens)
+        if (sender is not WpfTextBox textBox || FindVisualChild<ScrollViewer>(textBox) is not { } scrollViewer)
         {
-            var dpi = VisualTreeHelper.GetDpi(this);
-            var scaleX = 96 / dpi.PixelsPerInchX;
-            var scaleY = 96 / dpi.PixelsPerInchY;
-            var area = screen.WorkingArea;
-            var workArea = new Rect(area.Left * scaleX, area.Top * scaleY, area.Width * scaleX, area.Height * scaleY);
-            if (new Rect(left, top, right - left, bottom - top).IntersectsWith(workArea))
+            return;
+        }
+
+        var scrollingUpAtTop = e.Delta > 0 && scrollViewer.VerticalOffset <= 0;
+        var scrollingDownAtBottom = e.Delta < 0 && scrollViewer.VerticalOffset >= scrollViewer.ScrollableHeight;
+        if (scrollingUpAtTop || scrollingDownAtBottom)
+        {
+            return;
+        }
+
+        scrollViewer.ScrollToVerticalOffset(scrollViewer.VerticalOffset - e.Delta / 3d);
+        e.Handled = true;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
             {
-                return true;
+                return match;
+            }
+
+            var descendant = FindVisualChild<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
             }
         }
 
-        return false;
+        return null;
     }
 
     [DllImport("dwmapi.dll")]

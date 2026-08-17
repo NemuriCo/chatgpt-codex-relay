@@ -86,6 +86,8 @@ public sealed class JsonStateStoreTests
         Assert.AreEqual(projectId, result.State.SelectedProjectId);
         Assert.IsNull(result.State.WindowLeft);
         Assert.IsNull(result.State.WindowTop);
+        Assert.IsNull(result.State.WindowWidth);
+        Assert.IsNull(result.State.WindowHeight);
         Assert.IsFalse(result.State.IsWindowCollapsed);
         Assert.IsFalse(result.State.IsAlwaysOnTop);
 
@@ -104,6 +106,8 @@ public sealed class JsonStateStoreTests
         {
             WindowLeft = -1280.5,
             WindowTop = 48.25,
+            WindowWidth = 612.5,
+            WindowHeight = 488.75,
             IsWindowCollapsed = true
         };
 
@@ -113,6 +117,8 @@ public sealed class JsonStateStoreTests
 
         Assert.AreEqual(-1280.5, result.State.WindowLeft);
         Assert.AreEqual(48.25, result.State.WindowTop);
+        Assert.AreEqual(612.5, result.State.WindowWidth);
+        Assert.AreEqual(488.75, result.State.WindowHeight);
         Assert.IsTrue(result.State.IsWindowCollapsed);
     }
 

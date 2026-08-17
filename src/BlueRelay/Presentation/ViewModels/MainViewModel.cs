@@ -42,6 +42,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _generatePairingCodeCommand;
     private readonly RelayCommand _resetPairingCommand;
     private readonly RelayCommand _unbindWorkstreamCommand;
+    private readonly RelayCommand _openTaskDetailCommand;
+    private readonly RelayCommand _closeTaskDetailCommand;
     private Project? _selectedProject;
     private ProjectListItemViewModel? _selectedWorkstream;
     private bool _isEditing;
@@ -67,6 +69,8 @@ public sealed class MainViewModel : ObservableObject
     private ProjectListItemViewModel? _debugWorkstream;
     private bool _isDebugOpen;
     private bool _isSimulatingResult;
+    private bool _isTaskDetailOpen;
+    private ProjectListItemViewModel? _taskDetailWorkstream;
     private string _simulatedResultText = string.Empty;
     private WorkflowState _manualState;
 
@@ -118,6 +122,8 @@ public sealed class MainViewModel : ObservableObject
         _generatePairingCodeCommand = new RelayCommand(GeneratePairingCode);
         _resetPairingCommand = new RelayCommand(ResetPairingAsync, () => true);
         _unbindWorkstreamCommand = new RelayCommand(UnbindWorkstreamAsync, CanSelectWorkstream);
+        _openTaskDetailCommand = new RelayCommand(OpenTaskDetail);
+        _closeTaskDetailCommand = new RelayCommand(CloseTaskDetail);
         NewWorkstreamCommand = new RelayCommand(StartNewWorkstream, () => SelectedProject is not null && !IsEditing && !IsEditingWorkstream);
         _editProjectCommand = new RelayCommand(StartEditProject, CanMutateProject);
         _deleteProjectCommand = new RelayCommand(DeleteSelectedProjectAsync, CanMutateProject);
@@ -212,6 +218,10 @@ public sealed class MainViewModel : ObservableObject
     public ICommand ResetPairingCommand => _resetPairingCommand;
 
     public ICommand UnbindWorkstreamCommand => _unbindWorkstreamCommand;
+
+    public ICommand OpenTaskDetailCommand => _openTaskDetailCommand;
+
+    public ICommand CloseTaskDetailCommand => _closeTaskDetailCommand;
 
     public Project? SelectedProject
     {
@@ -448,6 +458,10 @@ public sealed class MainViewModel : ObservableObject
 
     public double? WindowTop => _state.WindowTop;
 
+    public double? WindowWidth => _state.WindowWidth;
+
+    public double? WindowHeight => _state.WindowHeight;
+
     public string CollapseGlyph => IsCollapsed ? "⌄" : "⌃";
 
     public string CollapseToolTip => IsCollapsed ? Ui.Expand : Ui.Collapse;
@@ -457,6 +471,32 @@ public sealed class MainViewModel : ObservableObject
     public ControlAppearance AlwaysOnTopAppearance => IsAlwaysOnTop ? ControlAppearance.Primary : ControlAppearance.Secondary;
 
     public bool HasDetails => IsEditing || SelectedProject is not null;
+
+    public bool IsTaskDetailOpen
+    {
+        get => _isTaskDetailOpen;
+        private set => SetProperty(ref _isTaskDetailOpen, value);
+    }
+
+    public ProjectListItemViewModel? TaskDetailWorkstream
+    {
+        get => _taskDetailWorkstream;
+        private set
+        {
+            if (SetProperty(ref _taskDetailWorkstream, value))
+            {
+                OnPropertyChanged(nameof(TaskDetailPrompt));
+                OnPropertyChanged(nameof(TaskDetailResult));
+                OnPropertyChanged(nameof(HasTaskDetailResult));
+            }
+        }
+    }
+
+    public string TaskDetailPrompt => TaskDetailWorkstream?.CurrentTaskText ?? string.Empty;
+
+    public string TaskDetailResult => TaskDetailWorkstream?.CurrentTaskResult ?? string.Empty;
+
+    public bool HasTaskDetailResult => TaskDetailWorkstream?.HasCurrentResult == true;
 
     public bool HasProjects => Projects.Count > 0;
 
@@ -552,6 +592,19 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(WindowTop));
     }
 
+    public void UpdateWindowSize(double width, double height)
+    {
+        if (IsCollapsed)
+        {
+            return;
+        }
+
+        _state.WindowWidth = width;
+        _state.WindowHeight = height;
+        OnPropertyChanged(nameof(WindowWidth));
+        OnPropertyChanged(nameof(WindowHeight));
+    }
+
     public async Task SaveWindowSettingsAsync()
     {
         var saveResult = await _projectService.TrySaveAsync();
@@ -571,6 +624,10 @@ public sealed class MainViewModel : ObservableObject
     private void ToggleCollapsed()
     {
         _state.IsWindowCollapsed = !_state.IsWindowCollapsed;
+        if (_state.IsWindowCollapsed)
+        {
+            CloseTaskDetail();
+        }
         OnPropertyChanged(nameof(IsCollapsed));
         OnPropertyChanged(nameof(CollapseGlyph));
         OnPropertyChanged(nameof(CollapseToolTip));
@@ -579,6 +636,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void OpenProjectManagement()
     {
+        CloseTaskDetail();
         if (IsCollapsed)
         {
             _state.IsWindowCollapsed = false;
@@ -589,6 +647,23 @@ public sealed class MainViewModel : ObservableObject
         }
 
         IsProjectManagementOpen = true;
+    }
+
+    private void OpenTaskDetail(object? parameter)
+    {
+        if (parameter is not ProjectListItemViewModel workstream || !workstream.HasCurrentTask)
+        {
+            return;
+        }
+
+        TaskDetailWorkstream = workstream;
+        IsTaskDetailOpen = true;
+    }
+
+    private void CloseTaskDetail()
+    {
+        IsTaskDetailOpen = false;
+        TaskDetailWorkstream = null;
     }
 
     private void CloseProjectManagement()
@@ -997,7 +1072,28 @@ public sealed class MainViewModel : ObservableObject
             nextWorkstream.Refresh();
         }
 
+        RefreshTaskDetailWorkstream();
         RaiseCommandStates();
+    }
+
+    private void RefreshTaskDetailWorkstream()
+    {
+        if (!IsTaskDetailOpen)
+        {
+            return;
+        }
+
+        var workstreamId = TaskDetailWorkstream?.Id;
+        var refreshed = workstreamId.HasValue
+            ? Workstreams.FirstOrDefault(workstream => workstream.Id == workstreamId.Value)
+            : null;
+        if (refreshed is null)
+        {
+            CloseTaskDetail();
+            return;
+        }
+
+        TaskDetailWorkstream = refreshed;
     }
 
     private async void Workstream_StateChangeRequested(object? sender, WorkflowState target)

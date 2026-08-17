@@ -18,6 +18,8 @@ public sealed class UiTextSet
     public required string NextAction { get; init; }
     public required string Pending { get; init; }
     public required string CurrentTask { get; init; }
+    public required string TaskPrompt { get; init; }
+    public required string TaskResult { get; init; }
     public required string CurrentTaskNone { get; init; }
     public required string Projects { get; init; }
     public required string Workstream { get; init; }
@@ -143,6 +145,8 @@ public static class LocalizationService
         NextAction = "Next action",
         Pending = "Pending",
         CurrentTask = "Current task",
+        TaskPrompt = "Task prompt",
+        TaskResult = "Result",
         CurrentTaskNone = "No task assigned",
         Projects = "Workstreams",
         Workstream = "Workstream",
@@ -265,6 +269,8 @@ public static class LocalizationService
         NextAction = "下一步",
         Pending = "待处理",
         CurrentTask = "当前任务",
+        TaskPrompt = "任务提示",
+        TaskResult = "结果",
         CurrentTaskNone = "未分配任务",
         Projects = "工作流",
         Workstream = "工作流",

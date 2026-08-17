@@ -15,6 +15,11 @@ public sealed class ApplicationState
 
     public double? WindowTop { get; set; }
 
+    // Nullable dimensions keep older state.json files compatible and allow the window to use its defaults.
+    public double? WindowWidth { get; set; }
+
+    public double? WindowHeight { get; set; }
+
     public bool IsWindowCollapsed { get; set; }
 
     public BrowserBridgeState BrowserBridge { get; set; } = new();
