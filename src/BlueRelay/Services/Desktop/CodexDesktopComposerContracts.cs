@@ -38,6 +38,31 @@ public sealed record CodexComposerCandidate(
     int SemanticScore,
     bool SupportsTextPattern = false);
 
+public static class CodexComposerCandidateResolver
+{
+    public static bool TryResolveElement<TElement>(
+        IEnumerable<(TElement Element, CodexComposerCandidate Candidate)> bindings,
+        CodexComposerCandidate selected,
+        out TElement? element)
+        where TElement : class
+    {
+        ArgumentNullException.ThrowIfNull(bindings);
+        ArgumentNullException.ThrowIfNull(selected);
+
+        foreach (var binding in bindings)
+        {
+            if (ReferenceEquals(binding.Candidate, selected))
+            {
+                element = binding.Element;
+                return true;
+            }
+        }
+
+        element = null;
+        return false;
+    }
+}
+
 public sealed record OpenAiDesktopInspection(
     IReadOnlyList<UiAutomationMetadata> Windows,
     IReadOnlyList<CodexComposerCandidate> ComposerCandidates);

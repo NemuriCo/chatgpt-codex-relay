@@ -126,7 +126,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         }
 
         if (!CodexComposerCandidateSelector.TrySelect(
-                candidates.Select(candidate => candidate.Metadata).ToList(),
+                candidates.Select(candidate => candidate.Candidate).ToList(),
                 out var selected) || selected is null)
         {
             StartupDiagnostics.Write("Codex composer result=composer_not_found");
@@ -150,8 +150,19 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             $"textPattern={selected.SupportsTextPattern}");
         CodexComposerDiagnostics.WriteStage("composer_candidate", stopwatch);
         CodexComposerDiagnostics.WriteStage("composer_selected", stopwatch);
+        if (!CodexComposerCandidateResolver.TryResolveElement(
+                candidates.Select(candidate => (candidate.Element, candidate.Candidate)),
+                selected,
+                out AutomationElement? target) || target is null)
+        {
+            CodexComposerDiagnostics.WriteStage("composer_selected_element_missing", stopwatch);
+            StartupDiagnostics.Write("Codex composer composer_selected_element_missing");
+            return CodexComposerInjectionResult.Failed(
+                "codex_composer_selection_lost",
+                "The selected Codex composer could not be resolved for injection.");
+        }
+
         StartupDiagnostics.Write("Codex composer result=composer_selected");
-        var target = candidates.First(candidate => ReferenceEquals(candidate.Metadata, selected.Metadata)).Element;
         var focusReady = false;
         CodexComposerDiagnostics.WriteStage("focus_started", stopwatch);
         try
@@ -297,7 +308,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
 
         var inspection = new OpenAiDesktopInspection(
             metadataWindows,
-            candidates.Select(candidate => candidate.Metadata).ToList());
+            candidates.Select(candidate => candidate.Candidate).ToList());
         WriteInspectionDiagnostics(inspection);
         return new InspectionCapture(inspection, candidates);
     }
@@ -481,7 +492,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                     window,
                     windowMetadata.Handle,
                     NativeMethods.GetForegroundWindow()),
-                candidate => CodexComposerCandidateSelector.IsHighConfidence(candidate.Metadata),
+                candidate => CodexComposerCandidateSelector.IsHighConfidence(candidate.Candidate),
                 cancellationToken);
             return new ComposerPhaseResult(
                 result.Candidates,
@@ -555,13 +566,13 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
     {
         return candidates
             .GroupBy(candidate => (
-                candidate.Metadata.Metadata.Handle,
-                candidate.Metadata.Metadata.ControlType,
-                candidate.Metadata.Metadata.AutomationId,
-                candidate.Metadata.Metadata.ClassName),
+                candidate.Candidate.Metadata.Handle,
+                candidate.Candidate.Metadata.ControlType,
+                candidate.Candidate.Metadata.AutomationId,
+                candidate.Candidate.Metadata.ClassName),
                 EqualityComparer<(IntPtr, string, string, string)>.Default)
             .Select(group => group
-                .OrderByDescending(candidate => candidate.Metadata.SemanticScore)
+                .OrderByDescending(candidate => candidate.Candidate.SemanticScore)
                 .First())
             .ToList();
     }
@@ -1121,7 +1132,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
 
     private sealed record AutomationCandidate(
         AutomationElement Element,
-        CodexComposerCandidate Metadata);
+        CodexComposerCandidate Candidate);
 
     private sealed record InspectionCapture(
         OpenAiDesktopInspection Inspection,

@@ -156,6 +156,57 @@ public sealed class CodexDesktopComposerTests
     }
 
     [TestMethod]
+    public void ResolvesSelectedCandidateToItsAutomationElementByCandidateIdentity()
+    {
+        var candidate = Candidate(
+            100,
+            "Edit",
+            "message-composer",
+            "Message editor",
+            supportsValuePattern: true,
+            className: "ProseMirror");
+        var selected = CodexComposerCandidateSelector.TrySelect([candidate], out var selectedCandidate);
+        var target = new FakeAutomationTarget();
+
+        Assert.IsTrue(selected);
+        Assert.AreSame(candidate, selectedCandidate);
+        Assert.IsTrue(CodexComposerCandidateResolver.TryResolveElement(
+            [(target, candidate)],
+            selectedCandidate!,
+            out var resolvedTarget));
+        Assert.AreSame(target, resolvedTarget);
+    }
+
+    [TestMethod]
+    public void SelectionLostReturnsSafeFailureWithoutThrowing()
+    {
+        var selectedCandidate = Candidate(
+            100,
+            "Edit",
+            "message-composer",
+            "Message editor",
+            supportsValuePattern: true,
+            className: "ProseMirror");
+        var currentCandidate = selectedCandidate with
+        {
+            Metadata = selectedCandidate.Metadata with { Name = "A newer composer element" }
+        };
+
+        Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([selectedCandidate], out var selected));
+        Assert.IsFalse(CodexComposerCandidateResolver.TryResolveElement(
+            [(new FakeAutomationTarget(), currentCandidate)],
+            selected!,
+            out var resolvedTarget));
+        Assert.IsNull(resolvedTarget);
+
+        var failure = CodexComposerInjectionResult.Failed(
+            "codex_composer_selection_lost",
+            "The selected Codex composer could not be resolved for injection.");
+        Assert.IsFalse(failure.Success);
+        Assert.AreEqual("codex_composer_selection_lost", failure.Code);
+    }
+
+    [TestMethod]
     public void CustomComposerSurfaceWithEditableParentIsRecognized()
     {
         var candidate = Candidate(
@@ -638,6 +689,10 @@ public sealed class CodexDesktopComposerTests
         public bool IsProseMirror { get; set; }
 
         public bool IsCandidate { get; set; }
+    }
+
+    private sealed class FakeAutomationTarget
+    {
     }
 
     private static CodexComposerCandidate Candidate(
