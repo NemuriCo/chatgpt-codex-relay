@@ -35,7 +35,8 @@ public sealed record CodexComposerCandidate(
     bool IsOpenAiWindow,
     bool SupportsValuePattern,
     bool IsValueReadOnly,
-    int SemanticScore);
+    int SemanticScore,
+    bool SupportsTextPattern = false);
 
 public sealed record OpenAiDesktopInspection(
     IReadOnlyList<UiAutomationMetadata> Windows,
@@ -76,6 +77,26 @@ public static class CodexComposerDiagnostics
 
 public static class CodexComposerCandidateSelector
 {
+    private static readonly string[] ComposerClassTokens =
+    [
+        "ProseMirror",
+        "RichTextInput",
+        "ComposerLayout",
+        "composer"
+    ];
+
+    private static readonly string[] ParentComposerTokens =
+    [
+        "ProseMirror",
+        "RichTextInput",
+        "ComposerLayout",
+        "composer",
+        "prompt",
+        "message",
+        "input",
+        "editor"
+    ];
+
     private static readonly string[] SemanticTokens =
     [
         "composer",
@@ -147,12 +168,16 @@ public static class CodexComposerCandidateSelector
             ? 58
             : metadata.ControlType.Equals("Document", StringComparison.OrdinalIgnoreCase)
                 ? 54
-                : 0;
+                : 42;
 
         score += candidate.IsOpenAiWindow ? 18 : 0;
         score += metadata.IsKeyboardFocusable ? 10 : 0;
         score += candidate.SupportsValuePattern && !candidate.IsValueReadOnly ? 10 : 0;
-        score += SemanticSignal(metadata.AutomationId, metadata.Name);
+        score += candidate.SupportsTextPattern ? 8 : 0;
+        score += IsChromiumFramework(metadata.FrameworkId) ? 12 : 0;
+        score += ContainsToken(metadata.ClassName, ComposerClassTokens) ? 55 : 0;
+        score += ContainsToken(metadata.ParentHierarchy, ParentComposerTokens) ? 20 : 0;
+        score += SemanticSignal(metadata.AutomationId, metadata.Name, metadata.ClassName);
         score += RelativeBottomSignal(metadata);
         return score;
     }
@@ -161,7 +186,18 @@ public static class CodexComposerCandidateSelector
     {
         var metadata = candidate.Metadata;
         var isEditableControl = metadata.ControlType.Equals("Edit", StringComparison.OrdinalIgnoreCase) ||
-                                metadata.ControlType.Equals("Document", StringComparison.OrdinalIgnoreCase);
+                                metadata.ControlType.Equals("Document", StringComparison.OrdinalIgnoreCase) ||
+                                metadata.ControlType.Equals("Custom", StringComparison.OrdinalIgnoreCase) ||
+                                metadata.ControlType.Equals("Group", StringComparison.OrdinalIgnoreCase) ||
+                                metadata.ControlType.Equals("Pane", StringComparison.OrdinalIgnoreCase);
+        var hasEditablePattern = candidate.SupportsValuePattern || candidate.SupportsTextPattern;
+        var hasComposerSignal = ContainsToken(
+            metadata.ClassName,
+            metadata.AutomationId,
+            metadata.Name,
+            metadata.ParentHierarchy,
+            ParentComposerTokens);
+        var isChromiumCandidate = IsChromiumFramework(metadata.FrameworkId);
         return candidate.IsOpenAiWindow &&
                metadata.Handle != IntPtr.Zero &&
                isEditableControl &&
@@ -169,14 +205,15 @@ public static class CodexComposerCandidateSelector
                metadata.IsKeyboardFocusable &&
                !metadata.IsOffscreen &&
                !metadata.Bounds.IsEmpty &&
-               (!candidate.SupportsValuePattern || !candidate.IsValueReadOnly) &&
-               !ContainsToken(metadata.AutomationId, metadata.Name, metadata.ParentHierarchy, NonComposerTokens);
+               hasEditablePattern &&
+               (!isChromiumCandidate || hasComposerSignal) &&
+               !ContainsToken(string.Empty, metadata.AutomationId, metadata.Name, metadata.ParentHierarchy, NonComposerTokens);
     }
 
-    private static int SemanticSignal(string automationId, string name)
+    private static int SemanticSignal(string automationId, string name, string className)
     {
         var signal = 0;
-        if (ContainsToken(automationId, name, string.Empty, SemanticTokens))
+        if (ContainsToken(className, automationId, name, string.Empty, SemanticTokens))
         {
             signal += 22;
         }
@@ -200,9 +237,21 @@ public static class CodexComposerCandidateSelector
         return relativePosition >= 0.75 ? 5 : 0;
     }
 
-    private static bool ContainsToken(string automationId, string name, string parentHierarchy, IEnumerable<string> tokens)
+    private static bool IsChromiumFramework(string frameworkId) =>
+        frameworkId.Equals("Chrome", StringComparison.OrdinalIgnoreCase) ||
+        frameworkId.Equals("Chromium", StringComparison.OrdinalIgnoreCase) ||
+        frameworkId.Equals("WebView2", StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsToken(string value, IEnumerable<string> tokens) =>
+        tokens.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
+
+    private static bool ContainsToken(
+        string className,
+        string automationId,
+        string name,
+        string parentHierarchy,
+        IEnumerable<string> tokens)
     {
-        var value = $"{automationId} {name} {parentHierarchy}";
-        return tokens.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
+        return ContainsToken($"{className} {automationId} {name} {parentHierarchy}", tokens);
     }
 }

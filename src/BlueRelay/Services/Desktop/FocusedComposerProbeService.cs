@@ -172,7 +172,9 @@ public sealed class FocusedComposerProbeService
             CodexComposerDiagnostics.WriteStage("focused_parent_walk_completed", stopwatch);
         }
 
-        var windowMetadata = ReadWindowMetadata(parents, focusedMetadata);
+        CodexComposerDiagnostics.WriteStage("focused_window_pid_lookup_started", stopwatch);
+        var windowMetadata = ReadWindowMetadata(focusedMetadata, cancellationToken);
+        CodexComposerDiagnostics.WriteStage("focused_window_pid_lookup_completed", stopwatch);
         var isCodexDesktop = windowMetadata?.IsCodexDesktop == true;
         var message = isCodexDesktop
             ? "Focused element belongs to Codex Desktop."
@@ -193,6 +195,7 @@ public sealed class FocusedComposerProbeService
     private static FocusedComposerElementMetadata ReadMetadata(AutomationElement element)
     {
         var current = element.Current;
+        var patternInfo = ReadSupportedPatterns(element);
         return new FocusedComposerElementMetadata(
             current.ProcessId,
             new IntPtr(current.NativeWindowHandle),
@@ -207,19 +210,26 @@ public sealed class FocusedComposerProbeService
             current.HasKeyboardFocus,
             current.IsOffscreen,
             ToBounds(current.BoundingRectangle),
-            ReadSupportedPatterns(element));
+            patternInfo.Patterns,
+            patternInfo.ValuePatternIsReadOnly);
     }
 
-    private static IReadOnlyList<string> ReadSupportedPatterns(AutomationElement element)
+    private static (IReadOnlyList<string> Patterns, bool? ValuePatternIsReadOnly) ReadSupportedPatterns(
+        AutomationElement element)
     {
         var supported = new List<string>();
+        bool? valuePatternIsReadOnly = null;
         foreach (var (name, pattern) in Patterns)
         {
             try
             {
-                if (element.TryGetCurrentPattern(pattern, out _))
+                if (element.TryGetCurrentPattern(pattern, out var patternObject))
                 {
                     supported.Add(name);
+                    if (string.Equals(name, "ValuePattern", StringComparison.Ordinal))
+                    {
+                        valuePatternIsReadOnly = ((ValuePattern)patternObject).Current.IsReadOnly;
+                    }
                 }
             }
             catch (Exception exception) when (IsUiAutomationException(exception))
@@ -228,42 +238,29 @@ public sealed class FocusedComposerProbeService
             }
         }
 
-        return supported;
+        return (supported, valuePatternIsReadOnly);
     }
 
     private static FocusedComposerWindowMetadata? ReadWindowMetadata(
-        IReadOnlyList<FocusedComposerElementMetadata> parents,
-        FocusedComposerElementMetadata focused)
+        FocusedComposerElementMetadata focused,
+        CancellationToken cancellationToken)
     {
-        var window = parents.LastOrDefault(parent => parent.NativeWindowHandle != IntPtr.Zero)
-                     ?? (focused.NativeWindowHandle != IntPtr.Zero ? focused : null);
-        if (window is null)
+        if (!CodexDesktopWindowOwnership.TryResolveForProcess(
+                focused.ProcessId,
+                cancellationToken,
+                out var window) ||
+            window is null)
         {
             return null;
         }
 
-        var processName = string.Empty;
-        string? processPath = null;
-        try
-        {
-            using var process = Process.GetProcessById(window.ProcessId);
-            processName = process.ProcessName;
-            processPath = process.MainModule?.FileName;
-        }
-        catch (Exception)
-        {
-        }
-
-        var signals = $"{window.Name} {window.ClassName} {processName} {processPath}";
-        var isCodexDesktop = signals.Contains("codex", StringComparison.OrdinalIgnoreCase) ||
-                             signals.Contains("openai", StringComparison.OrdinalIgnoreCase);
         return new FocusedComposerWindowMetadata(
             window.ProcessId,
-            window.NativeWindowHandle,
-            window.Name,
+            window.Handle,
+            window.WindowTitle,
             window.ClassName,
-            processName,
-            isCodexDesktop);
+            window.ProcessName,
+            true);
     }
 
     private static bool IsUiAutomationException(Exception exception) =>

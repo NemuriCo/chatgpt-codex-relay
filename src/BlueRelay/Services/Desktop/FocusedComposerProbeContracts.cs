@@ -16,7 +16,8 @@ public sealed record FocusedComposerElementMetadata(
     bool HasKeyboardFocus,
     bool IsOffscreen,
     UiAutomationBounds BoundingRectangle,
-    IReadOnlyList<string> SupportedPatterns);
+    IReadOnlyList<string> SupportedPatterns,
+    bool? ValuePatternIsReadOnly = null);
 
 public sealed record FocusedComposerWindowMetadata(
     int ProcessId,
@@ -104,6 +105,7 @@ public sealed record FocusedComposerProbeResult(
         builder.AppendLine($"Offscreen={element.IsOffscreen}");
         builder.AppendLine($"Bounds={FormatBounds(element.BoundingRectangle)}");
         builder.AppendLine($"Patterns=[{string.Join(", ", element.SupportedPatterns)}]");
+        builder.AppendLine($"ValuePatternIsReadOnly={element.ValuePatternIsReadOnly?.ToString() ?? "(unavailable)"}");
     }
 
     private static string FormatBounds(UiAutomationBounds bounds) =>

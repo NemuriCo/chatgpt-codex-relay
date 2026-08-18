@@ -125,11 +125,25 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 "No unambiguous editable Codex composer was found.");
         }
 
+        CodexComposerDiagnostics.WriteStage("window_candidate_pid_match", stopwatch);
+        StartupDiagnostics.Write(
+            $"Codex composer window candidate matched pid={selected.Metadata.ProcessId} " +
+            $"hwnd={selected.Metadata.Handle.ToInt64()}");
+        CodexComposerDiagnostics.WriteStage("window_selected", stopwatch);
+        StartupDiagnostics.Write(
+            $"Codex composer candidate controlType={selected.Metadata.ControlType} " +
+            $"framework={selected.Metadata.FrameworkId} className={selected.Metadata.ClassName} " +
+            $"valuePattern={selected.SupportsValuePattern} " +
+            $"valuePatternReadOnly={selected.IsValueReadOnly} " +
+            $"textPattern={selected.SupportsTextPattern}");
+        CodexComposerDiagnostics.WriteStage("composer_candidate", stopwatch);
+        CodexComposerDiagnostics.WriteStage("composer_selected", stopwatch);
         var target = candidates.First(candidate => ReferenceEquals(candidate.Metadata, selected.Metadata)).Element;
         var focusReady = false;
         CodexComposerDiagnostics.WriteStage("focus_started", stopwatch);
         try
         {
+            NativeMethods.SetForegroundWindow(selected.Metadata.Handle);
             target.SetFocus();
             focusReady = HasFocus(target);
         }
@@ -157,16 +171,27 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 "The Codex composer could not receive focus.");
         }
 
+        CodexComposerDiagnostics.WriteStage("focus_success", stopwatch);
+
         CodexComposerDiagnostics.WriteStage("write_started", stopwatch);
         try
         {
             if (TrySetValue(target, text))
             {
+                StartupDiagnostics.Write("Codex composer write_method=value_pattern");
                 target.SetFocus();
+                CodexComposerDiagnostics.WriteStage("fill_success", stopwatch);
                 return CodexComposerInjectionResult.Filled("Codex composer filled.");
             }
 
-            return PasteWithClipboardFallback(target, text, cancellationToken);
+            StartupDiagnostics.Write("Codex composer write_method=clipboard");
+            var fallbackResult = PasteWithClipboardFallback(target, text, cancellationToken);
+            if (fallbackResult.Success)
+            {
+                CodexComposerDiagnostics.WriteStage("fill_success", stopwatch);
+            }
+
+            return fallbackResult;
         }
         catch (ElementNotAvailableException exception)
         {
@@ -377,13 +402,14 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                             out var metadata))
                     {
                         metadata = metadata with { IsLikelyOpenAiWindow = true };
-                        var supportsValuePattern = TryReadValuePattern(element, out var isReadOnly);
+                        var patternInfo = ReadEditablePatterns(element);
                         var candidate = new CodexComposerCandidate(
                             metadata,
                             true,
-                            supportsValuePattern,
-                            isReadOnly,
-                            0);
+                            patternInfo.SupportsValuePattern,
+                            patternInfo.IsValueReadOnly,
+                            0,
+                            patternInfo.SupportsTextPattern);
                         candidates.Add(new AutomationCandidate(
                             element,
                             candidate with { SemanticScore = CodexComposerCandidateSelector.Score(candidate) }));
@@ -526,7 +552,11 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         try
         {
             var controlType = element.Current.ControlType;
-            return controlType == ControlType.Edit || controlType == ControlType.Document;
+            return controlType == ControlType.Edit ||
+                   controlType == ControlType.Document ||
+                   controlType == ControlType.Custom ||
+                   controlType == ControlType.Group ||
+                   controlType == ControlType.Pane;
         }
         catch (ElementNotAvailableException)
         {
@@ -542,31 +572,45 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         }
     }
 
-    private static bool TryReadValuePattern(AutomationElement element, out bool isReadOnly)
+    private static (bool SupportsValuePattern, bool IsValueReadOnly, bool SupportsTextPattern) ReadEditablePatterns(
+        AutomationElement element)
     {
-        isReadOnly = false;
+        var supportsValuePattern = false;
+        var isValueReadOnly = false;
+        var supportsTextPattern = false;
         try
         {
-            if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
+            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
             {
-                return false;
+                supportsValuePattern = true;
+                isValueReadOnly = ((ValuePattern)pattern).Current.IsReadOnly;
             }
-
-            isReadOnly = ((ValuePattern)pattern).Current.IsReadOnly;
-            return true;
         }
         catch (ElementNotAvailableException)
         {
-            return false;
         }
         catch (InvalidOperationException)
         {
-            return false;
         }
         catch (COMException)
         {
-            return false;
         }
+
+        try
+        {
+            supportsTextPattern = element.TryGetCurrentPattern(TextPattern.Pattern, out _);
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (COMException)
+        {
+        }
+
+        return (supportsValuePattern, isValueReadOnly, supportsTextPattern);
     }
 
     private static bool TrySetValue(AutomationElement target, string text)
@@ -749,9 +793,13 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 var details = current.Current;
                 var controlType = GetControlTypeName(details.ControlType);
                 var automationId = details.AutomationId ?? string.Empty;
-                hierarchy.Add(string.IsNullOrWhiteSpace(automationId)
+                var node = string.IsNullOrWhiteSpace(automationId)
                     ? controlType
-                    : $"{controlType}#{automationId}");
+                    : $"{controlType}#{automationId}";
+                var className = details.ClassName ?? string.Empty;
+                hierarchy.Add(string.IsNullOrWhiteSpace(className)
+                    ? node
+                    : $"{node}@{className}");
                 current = TreeWalker.RawViewWalker.GetParent(current);
             }
         }
@@ -819,8 +867,11 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             StartupDiagnostics.Write(
                 $"Codex composer candidate hwnd={candidate.Metadata.Handle.ToInt64()} pid={candidate.Metadata.ProcessId} " +
                 $"controlType={candidate.Metadata.ControlType} automationId={candidate.Metadata.AutomationId} " +
+                $"framework={candidate.Metadata.FrameworkId} className={candidate.Metadata.ClassName} " +
                 $"enabled={candidate.Metadata.IsEnabled} keyboardFocusable={candidate.Metadata.IsKeyboardFocusable} " +
-                $"valuePattern={candidate.SupportsValuePattern}");
+                $"valuePattern={candidate.SupportsValuePattern} " +
+                $"valuePatternReadOnly={candidate.IsValueReadOnly} " +
+                $"textPattern={candidate.SupportsTextPattern}");
         }
     }
 
@@ -967,6 +1018,10 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetForegroundWindow(IntPtr handle);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]

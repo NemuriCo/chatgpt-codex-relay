@@ -11,10 +11,11 @@ public sealed class CodexDesktopComposerTests
     {
         var candidate = Candidate(
             handle: 100,
-            controlType: "Document",
+            controlType: "Edit",
             automationId: "message-composer",
             name: "Message editor",
-            supportsValuePattern: true);
+            supportsValuePattern: true,
+            className: "ProseMirror ProseMirror-focused");
 
         var selected = CodexComposerCandidateSelector.TrySelect([candidate], out var result);
 
@@ -37,11 +38,18 @@ public sealed class CodexDesktopComposerTests
     public void RejectsControlsThatAreNotSafeEditableOpenAiCandidates()
     {
         var nonOpenAi = Candidate(100, "Edit", "message-composer", "Message editor", supportsValuePattern: true, isOpenAiWindow: false);
-        var readOnly = Candidate(100, "Document", "message-composer", "Message editor", supportsValuePattern: true, isReadOnly: true);
+        var readOnly = Candidate(
+            100,
+            "Document",
+            "message-composer",
+            "Message editor",
+            supportsValuePattern: true,
+            isReadOnly: true,
+            className: "ProseMirror");
         var sendButton = Candidate(100, "Edit", "send-input", "Send", supportsValuePattern: true);
 
         Assert.IsFalse(CodexComposerCandidateSelector.TrySelect([nonOpenAi], out _));
-        Assert.IsFalse(CodexComposerCandidateSelector.TrySelect([readOnly], out _));
+        Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([readOnly], out _));
         Assert.IsFalse(CodexComposerCandidateSelector.TrySelect([sendButton], out _));
     }
 
@@ -54,6 +62,7 @@ public sealed class CodexDesktopComposerTests
             "",
             "",
             supportsValuePattern: false,
+            supportsTextPattern: true,
             parentHierarchy: "Pane#composer-container > Document");
 
         Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([candidate], out var selected));
@@ -83,6 +92,132 @@ public sealed class CodexDesktopComposerTests
 
         Assert.IsFalse(result.Success);
         Assert.IsTrue(result.ClipboardRestoreFailed);
+    }
+
+    [TestMethod]
+    public void RealChromeProseMirrorComposerIsPreferred()
+    {
+        var composer = Candidate(
+            100,
+            "Edit",
+            "",
+            "随心输入",
+            supportsValuePattern: true,
+            className: "ProseMirror ProseMirror-focused",
+            frameworkId: "Chrome");
+        var unrelatedChromeEdit = Candidate(
+            100,
+            "Edit",
+            "toolbar-input",
+            "Address bar",
+            supportsValuePattern: true,
+            className: "Chrome_RenderWidgetHostHWND",
+            frameworkId: "Chrome",
+            parentHierarchy: "Pane#toolbar");
+
+        Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([composer, unrelatedChromeEdit], out var selected));
+        Assert.AreSame(composer, selected);
+    }
+
+    [TestMethod]
+    public void ProseMirrorClassTokenSurvivesFocusAndBuildHashChanges()
+    {
+        var candidate = Candidate(
+            100,
+            "Edit",
+            "",
+            "Type your message",
+            supportsValuePattern: true,
+            className: "ProseMirror",
+            frameworkId: "Chrome",
+            parentHierarchy: "Group@_RichTextInput_newhash > Pane@_ComposerLayoutRoot_otherhash");
+
+        Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([candidate], out _));
+    }
+
+    [TestMethod]
+    public void CustomComposerSurfaceWithEditableParentIsRecognized()
+    {
+        var candidate = Candidate(
+            100,
+            "Custom",
+            "",
+            "",
+            supportsValuePattern: false,
+            supportsTextPattern: true,
+            className: "ComposerSurface",
+            frameworkId: "Chrome",
+            parentHierarchy: "Edit@ProseMirror > Group@ComposerLayoutRoot");
+
+        Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([candidate], out _));
+    }
+
+    [TestMethod]
+    public void ReadOnlyValuePatternRemainsAnExactFallbackCandidate()
+    {
+        var candidate = Candidate(
+            100,
+            "Edit",
+            "",
+            "localized placeholder",
+            supportsValuePattern: true,
+            isReadOnly: true,
+            className: "ProseMirror",
+            frameworkId: "Chrome");
+
+        Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([candidate], out var selected));
+        Assert.IsTrue(selected!.IsValueReadOnly);
+    }
+
+    [TestMethod]
+    public void FocusedChromeNodeCanResolveCodexWindowByPidWithoutItsOwnHwnd()
+    {
+        var candidates = new[]
+        {
+            new CodexDesktopWindowCandidate(
+                23280,
+                new IntPtr(0x1234),
+                "Blue project",
+                "Chrome_WidgetWin_1",
+                "Codex",
+                @"C:\Program Files\Codex\Codex.exe",
+                IsForeground: true)
+        };
+
+        Assert.IsTrue(CodexDesktopWindowOwnership.TrySelectForProcess(23280, candidates, out var selected));
+        Assert.AreEqual(new IntPtr(0x1234), selected!.Handle);
+    }
+
+    [TestMethod]
+    public void FocusedPidMismatchIsRejected()
+    {
+        var candidates = new[]
+        {
+            new CodexDesktopWindowCandidate(
+                23281,
+                new IntPtr(0x1234),
+                "Codex",
+                "Chrome_WidgetWin_1",
+                "Codex",
+                @"C:\Program Files\Codex\Codex.exe")
+        };
+
+        Assert.IsFalse(CodexDesktopWindowOwnership.TrySelectForProcess(23280, candidates, out _));
+    }
+
+    [TestMethod]
+    public void MultipleCodexWindowsRequireSafeScoringResolution()
+    {
+        var ambiguous = new[]
+        {
+            new CodexDesktopWindowCandidate(23280, new IntPtr(0x1234), "Codex", "Chrome_WidgetWin_1", "Codex", @"C:\Codex.exe"),
+            new CodexDesktopWindowCandidate(23280, new IntPtr(0x5678), "Codex", "Chrome_WidgetWin_1", "Codex", @"C:\Codex.exe")
+        };
+        var foreground = ambiguous[1] with { IsForeground = true };
+
+        Assert.IsFalse(CodexDesktopWindowOwnership.TrySelectForProcess(23280, ambiguous, out _));
+        Assert.IsTrue(CodexDesktopWindowOwnership.TrySelectForProcess(23280, [ambiguous[0], foreground], out var selected));
+        Assert.AreEqual(foreground.Handle, selected!.Handle);
     }
 
     [TestMethod]
@@ -194,7 +329,8 @@ public sealed class CodexDesktopComposerTests
             true,
             false,
             new UiAutomationBounds(10, 700, 600, 80),
-            ["TextPattern", "TextPattern2"]);
+            ["ValuePattern", "TextPattern", "TextPattern2"],
+            false);
         var result = new FocusedComposerProbeResult(
             true,
             "focused_codex_element",
@@ -208,8 +344,9 @@ public sealed class CodexDesktopComposerTests
 
         StringAssert.Contains(display, "ControlType=Document");
         StringAssert.Contains(display, "FrameworkId=Chromium");
-        StringAssert.Contains(display, "Patterns=[TextPattern, TextPattern2]");
+        StringAssert.Contains(display, "Patterns=[ValuePattern, TextPattern, TextPattern2]");
         StringAssert.Contains(display, "Name=随心输入");
+        StringAssert.Contains(display, "ValuePatternIsReadOnly=False");
         Assert.IsFalse(display.Contains("Value=", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -257,7 +394,10 @@ public sealed class CodexDesktopComposerTests
         bool supportsValuePattern,
         bool isOpenAiWindow = true,
         bool isReadOnly = false,
-        string parentHierarchy = "Pane#conversation > Document#message-editor")
+        string parentHierarchy = "Pane#conversation > Document#message-editor",
+        bool supportsTextPattern = false,
+        string className = "",
+        string frameworkId = "Chrome")
     {
         var bounds = new UiAutomationBounds(10, 700, 600, 80);
         var metadata = new UiAutomationMetadata(
@@ -267,8 +407,8 @@ public sealed class CodexDesktopComposerTests
             controlType,
             automationId,
             name,
-            "",
-            "Chrome",
+            className,
+            frameworkId,
             true,
             true,
             false,
@@ -277,6 +417,12 @@ public sealed class CodexDesktopComposerTests
             parentHierarchy,
             true,
             false);
-        return new CodexComposerCandidate(metadata, isOpenAiWindow, supportsValuePattern, isReadOnly, 0);
+        return new CodexComposerCandidate(
+            metadata,
+            isOpenAiWindow,
+            supportsValuePattern,
+            isReadOnly,
+            0,
+            supportsTextPattern);
     }
 }
