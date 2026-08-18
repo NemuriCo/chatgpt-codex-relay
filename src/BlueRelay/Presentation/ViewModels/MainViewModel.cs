@@ -1483,6 +1483,8 @@ public sealed class MainViewModel : ObservableObject
         CodexComposerDiagnostics.WriteStage("fill_clicked");
         SetStatus(Ui.CodexComposerSearching);
         var prompt = RelayPromptComposer.Compose(task.UserNote, task.Prompt);
+        CodexComposerDiagnostics.WritePayloadMetadata("task_payload", task.Prompt);
+        CodexComposerDiagnostics.WritePayloadMetadata("composer_source", prompt);
         CodexComposerInjectionResult result;
         try
         {
@@ -1544,9 +1546,13 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        SetStatus(result.ClipboardRestoreFailed
-            ? Ui.CodexComposerFilledClipboardRestoreFailed
-            : Ui.CodexComposerFilled);
+        SetStatus(result.Code == "clipboard_paste_accepted_as_reference"
+            ? result.ClipboardRestoreFailed
+                ? Ui.CodexComposerClipboardReferenceAcceptedRestoreFailed
+                : Ui.CodexComposerClipboardReferenceAccepted
+            : result.ClipboardRestoreFailed
+                ? Ui.CodexComposerFilledClipboardRestoreFailed
+                : Ui.CodexComposerFilled);
     }
 
     private string GetComposerFailureMessage(CodexComposerInjectionResult result)
@@ -1564,6 +1570,7 @@ public sealed class MainViewModel : ObservableObject
             "codex_composer_cancelled" => Ui.CodexComposerCancelled,
             "codex_clipboard_unsafe" => Ui.CodexComposerClipboardUnsafe,
             "codex_task_empty" => Ui.CodexComposerTaskEmpty,
+            "codex_composer_verification_failed" => Ui.CodexComposerVerificationFailed,
             _ => Ui.CodexComposerInjectionFailed
         };
     }

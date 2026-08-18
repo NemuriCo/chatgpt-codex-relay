@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using BlueRelay.Diagnostics;
 
 namespace BlueRelay.Services.Desktop;
@@ -72,16 +73,92 @@ public sealed record CodexComposerInjectionResult(
     string Code,
     string Message,
     bool UsedClipboardFallback = false,
-    bool ClipboardRestoreFailed = false)
+    bool ClipboardRestoreFailed = false,
+    CodexComposerInjectionMode Mode = CodexComposerInjectionMode.Unknown)
 {
-    public static CodexComposerInjectionResult Filled(string message, bool usedClipboardFallback = false, bool clipboardRestoreFailed = false) =>
-        new(true, "filled", message, usedClipboardFallback, clipboardRestoreFailed);
+    public static CodexComposerInjectionResult Filled(
+        string message,
+        bool usedClipboardFallback = false,
+        bool clipboardRestoreFailed = false,
+        CodexComposerInjectionMode mode = CodexComposerInjectionMode.Unknown) =>
+        new(true, "filled", message, usedClipboardFallback, clipboardRestoreFailed, mode);
 
     public static CodexComposerInjectionResult Failed(
         string code,
         string message,
-        bool clipboardRestoreFailed = false) =>
-        new(false, code, message, ClipboardRestoreFailed: clipboardRestoreFailed);
+        bool clipboardRestoreFailed = false,
+        CodexComposerInjectionMode mode = CodexComposerInjectionMode.VerificationFailed) =>
+        new(false, code, message, ClipboardRestoreFailed: clipboardRestoreFailed, Mode: mode);
+}
+
+public enum CodexComposerInjectionMode
+{
+    Unknown,
+    ValuePatternVerified,
+    ClipboardInlineVerified,
+    ClipboardReferenceAccepted,
+    VerificationFailed
+}
+
+public sealed record CodexComposerWriteVerification(
+    bool ValueAvailable,
+    string? Value,
+    bool TextAvailable,
+    string? Text,
+    bool ValueMatchesSource,
+    bool TextMatchesSource)
+{
+    public int ValueLength => Value?.Length ?? 0;
+
+    public int TextLength => Text?.Length ?? 0;
+
+    public bool IsVerified =>
+        (ValueAvailable || TextAvailable) &&
+        (!ValueAvailable || ValueMatchesSource) &&
+        (!TextAvailable || TextMatchesSource);
+}
+
+public static class CodexComposerWriteVerifier
+{
+    public static CodexComposerWriteVerification Verify(
+        string source,
+        bool valueAvailable,
+        string? value,
+        bool textAvailable,
+        string? text)
+    {
+        var normalizedSource = NormalizeComposerTextForVerification(source);
+        var normalizedValue = NormalizeComposerTextForVerification(value);
+        var normalizedText = NormalizeComposerTextForVerification(text);
+        return new CodexComposerWriteVerification(
+            valueAvailable,
+            value,
+            textAvailable,
+            text,
+            valueAvailable && normalizedValue.Equals(normalizedSource, StringComparison.Ordinal),
+            textAvailable && normalizedText.Equals(normalizedSource, StringComparison.Ordinal));
+    }
+
+    public static string NormalizeComposerTextForVerification(string? value)
+    {
+        return (value ?? string.Empty)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+    }
+
+    public static bool IsEmpty(CodexComposerWriteVerification verification)
+    {
+        return (verification.ValueAvailable || verification.TextAvailable) &&
+               (!verification.ValueAvailable || NormalizeComposerTextForVerification(verification.Value).Length == 0) &&
+               (!verification.TextAvailable || NormalizeComposerTextForVerification(verification.Text).Length == 0);
+    }
+
+    public static bool HasReferencedPastedTextSignal(params string?[] values)
+    {
+        return values.Any(value => value?.Contains(
+            "referenced pasted text file",
+            StringComparison.OrdinalIgnoreCase) == true);
+    }
 }
 
 public interface ICodexDesktopComposerInjector
@@ -188,6 +265,17 @@ public static class CodexComposerDiagnostics
     {
         var elapsed = stopwatch?.ElapsedMilliseconds ?? 0;
         StartupDiagnostics.Write($"Codex composer stage={stage} elapsedMs={elapsed}");
+    }
+
+    public static void WritePayloadMetadata(string stage, string text)
+    {
+        var normalized = CodexComposerWriteVerifier.NormalizeComposerTextForVerification(text);
+        var lineCount = normalized.Length == 0 ? 0 : normalized.Count(character => character == '\n') + 1;
+        StartupDiagnostics.Write(
+            $"Codex composer {stage} " +
+            $"sourceLength={text.Length} " +
+            $"sourceLines={lineCount} " +
+            $"sourceUtf8ByteCount={Encoding.UTF8.GetByteCount(text)}");
     }
 }
 

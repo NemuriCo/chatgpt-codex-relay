@@ -199,6 +199,31 @@ public sealed class BrowserBridgeTests
     }
 
     [TestMethod]
+    public async Task BrowserCaptureAndTaskPayloadPreserveFiveSixteenAndThirtyTwoKilobyteTasks()
+    {
+        var state = new ApplicationState();
+        var payloadStore = new RelayPayloadStore(Path.Combine(_testDirectory, "long-payloads"));
+        var projectService = new ProjectService(state, new MemoryStateStore(), new WorkflowStateMachine());
+        var bridge = new BrowserBridgeService(state, projectService, payloadStore: payloadStore);
+        var project = (await projectService.TryCreateAsync("Long payloads", CreateDirectory("long-payloads"))).Project!;
+        var workstream = project.Workstreams[0];
+        Assert.IsTrue((await bridge.PairAsync(bridge.GeneratePairingCode().Code!, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
+
+        foreach (var size in new[] { 5 * 1024, 16 * 1024, 32 * 1024 })
+        {
+            var payload = BuildLongPayload(size);
+            var capture = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+                "installation-a", "tab-a", payload, "https://chatgpt.com/c/tab-a", "tab-a", "tab-a"));
+
+            Assert.IsTrue(capture.Success, capture.Error);
+            Assert.AreEqual(payload, capture.Value!.Prompt);
+            Assert.AreEqual(payload, payloadStore.Read(capture.Value.Payload));
+            Assert.AreEqual(payload.Length, capture.Value.Prompt.Length);
+        }
+    }
+
+    [TestMethod]
     public async Task StaleTabCanBeReplacedByAnotherTabForTheSameConversation()
     {
         var state = new ApplicationState();
@@ -561,6 +586,21 @@ public sealed class BrowserBridgeTests
         var path = Path.Combine(_testDirectory, name);
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private static string BuildLongPayload(int minimumLength)
+    {
+        const string prefix = "# CODEX_TASK\nBLUERELAY_PAYLOAD_START_7F3A\n中文 English Markdown C# JSON PowerShell C:\\Projects\\BlueRelay 😊\n";
+        const string repeated = "重复长段落：**bold** `inline` {\"key\":\"值\"} arrow → infinity ∞\n";
+        const string suffix = "BLUERELAY_PAYLOAD_END_91C2";
+        var builder = new System.Text.StringBuilder(prefix);
+        while (builder.Length + suffix.Length + repeated.Length < minimumLength)
+        {
+            builder.Append(repeated);
+        }
+
+        builder.Append(suffix);
+        return builder.ToString();
     }
 
     private static int GetUnusedPort()

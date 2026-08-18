@@ -107,7 +107,10 @@ public sealed class UiTextSet
     public required string FillCodex { get; init; }
     public required string CodexComposerFilled { get; init; }
     public required string CodexComposerFilledClipboardRestoreFailed { get; init; }
+    public required string CodexComposerClipboardReferenceAccepted { get; init; }
+    public required string CodexComposerClipboardReferenceAcceptedRestoreFailed { get; init; }
     public required string CodexComposerClipboardRestoreFailed { get; init; }
+    public required string CodexComposerVerificationFailed { get; init; }
     public required string CodexComposerNotFound { get; init; }
     public required string CodexComposerClipboardUnsafe { get; init; }
     public required string CodexComposerTaskEmpty { get; init; }
@@ -301,7 +304,10 @@ public static class LocalizationService
         FillCodex = "Fill into Codex",
         CodexComposerFilled = "Filled into Codex. Review it and send manually.",
         CodexComposerFilledClipboardRestoreFailed = "Filled into Codex, but the original plain-text clipboard could not be restored.",
+        CodexComposerClipboardReferenceAccepted = "The long text was accepted by Codex as a pasted-text reference. Review it and send manually.",
+        CodexComposerClipboardReferenceAcceptedRestoreFailed = "The long text was accepted by Codex as a pasted-text reference, but the original plain-text clipboard could not be restored.",
         CodexComposerClipboardRestoreFailed = "Codex filling did not complete, and the original plain-text clipboard could not be restored.",
+        CodexComposerVerificationFailed = "The Codex input box did not contain the complete task text. Try again.",
         CodexComposerNotFound = "No editable Codex input box was found.\nOpen a Codex session and try again.",
         CodexComposerClipboardUnsafe = "The clipboard could not be used safely for Codex input. Close other clipboard content and try again.",
         CodexComposerTaskEmpty = "The current task is empty and could not be filled into Codex.",
@@ -494,7 +500,10 @@ public static class LocalizationService
         FillCodex = "填入 Codex",
         CodexComposerFilled = "已填入 Codex，等待你检查并发送。",
         CodexComposerFilledClipboardRestoreFailed = "已填入 Codex，但原纯文本剪贴板未能恢复。",
+        CodexComposerClipboardReferenceAccepted = "长文本已作为 Codex 粘贴引用填入，请检查后发送。",
+        CodexComposerClipboardReferenceAcceptedRestoreFailed = "长文本已作为 Codex 粘贴引用填入，但原纯文本剪贴板未能恢复。",
         CodexComposerClipboardRestoreFailed = "填入 Codex 未完成，且原纯文本剪贴板未能恢复。",
+        CodexComposerVerificationFailed = "Codex 输入框未能完整写入任务内容，请重试。",
         CodexComposerNotFound = "没有找到可编辑的 Codex 输入框。\n请先打开 Codex 会话后重试。",
         CodexComposerClipboardUnsafe = "无法安全使用剪贴板填入 Codex。请关闭其他剪贴板内容后重试。",
         CodexComposerTaskEmpty = "当前任务为空，无法填入 Codex。",

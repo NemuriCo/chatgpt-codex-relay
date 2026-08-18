@@ -607,6 +607,114 @@ public sealed class CodexDesktopComposerTests
     }
 
     [TestMethod]
+    public void ShortValuePatternWriteRequiresExactContentEquality()
+    {
+        var source = new string('x', 100);
+        var verification = CodexComposerWriteVerifier.Verify(
+            source,
+            valueAvailable: true,
+            value: source,
+            textAvailable: true,
+            text: source);
+
+        Assert.IsTrue(verification.IsVerified);
+        Assert.IsTrue(verification.ValueMatchesSource);
+        Assert.IsTrue(verification.TextMatchesSource);
+    }
+
+    [TestMethod]
+    public void SilentValuePatternTruncationFailsVerificationAndMustFallback()
+    {
+        var source = new string('x', 5000);
+        var verification = CodexComposerWriteVerifier.Verify(
+            source,
+            valueAvailable: true,
+            value: source[..1024],
+            textAvailable: false,
+            text: null);
+
+        Assert.IsFalse(verification.IsVerified);
+        Assert.IsFalse(verification.ValueMatchesSource);
+        Assert.AreEqual(1024, verification.ValueLength);
+    }
+
+    [TestMethod]
+    public void SameLengthChangedTextFailsVerification()
+    {
+        var source = "abcdef";
+        var changed = "abcdeg";
+        var verification = CodexComposerWriteVerifier.Verify(
+            source,
+            valueAvailable: true,
+            value: changed,
+            textAvailable: true,
+            text: changed);
+
+        Assert.AreEqual(source.Length, changed.Length);
+        Assert.IsFalse(verification.IsVerified);
+        Assert.IsFalse(verification.ValueMatchesSource);
+        Assert.IsFalse(verification.TextMatchesSource);
+    }
+
+    [TestMethod]
+    public void VerificationOnlyNormalizesProviderLineEndings()
+    {
+        const string source = "line one\r\nline two\r\n";
+        const string destination = "line one\nline two\n";
+
+        var verification = CodexComposerWriteVerifier.Verify(
+            source,
+            valueAvailable: true,
+            value: destination,
+            textAvailable: true,
+            text: destination);
+
+        Assert.IsTrue(verification.IsVerified);
+        Assert.AreEqual("a\n b", CodexComposerWriteVerifier.NormalizeComposerTextForVerification("a\r\n b"));
+    }
+
+    [TestMethod]
+    public void MarkdownUnicodeAndLargePayloadRemainExact()
+    {
+        var source = string.Join(
+            "\r\n",
+            "# heading",
+            "**bold** `inline`",
+            "```csharp",
+            "var path = @\"C:\\\\Projects\\BlueRelay\";",
+            "```",
+            "{\"中文\":\"日本語 😊 ∞ →\"}");
+
+        var verification = CodexComposerWriteVerifier.Verify(
+            source,
+            valueAvailable: true,
+            value: source.Replace("\r\n", "\n", StringComparison.Ordinal),
+            textAvailable: true,
+            text: source.Replace("\r\n", "\n", StringComparison.Ordinal));
+
+        Assert.IsTrue(verification.IsVerified);
+
+        var large = string.Concat(Enumerable.Repeat("中文 English **bold** C# JSON PowerShell C:\\Projects\\BlueRelay 😊\n", 512));
+        Assert.IsTrue(large.Length >= 16 * 1024);
+        var largeVerification = CodexComposerWriteVerifier.Verify(
+            large,
+            valueAvailable: true,
+            value: large,
+            textAvailable: true,
+            text: large);
+        Assert.IsTrue(largeVerification.IsVerified);
+    }
+
+    [TestMethod]
+    public void ReferencedPastedTextSignalIsSeparateFromInlineEquality()
+    {
+        Assert.IsTrue(CodexComposerWriteVerifier.HasReferencedPastedTextSignal(
+            "Referenced pasted text files:\n- pasted text file"));
+        Assert.IsFalse(CodexComposerWriteVerifier.HasReferencedPastedTextSignal(
+            "ordinary composer text"));
+    }
+
+    [TestMethod]
     public void ReplaceDialogHasExactlyTwoVisibleActions()
     {
         var buttons = AskDialogButtonConfiguration.ReplaceOrCancel("替换", "取消");
