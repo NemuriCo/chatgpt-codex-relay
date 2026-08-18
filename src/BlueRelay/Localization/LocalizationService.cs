@@ -115,6 +115,18 @@ public sealed class UiTextSet
     public required string CodexComposerProbeTimeout { get; init; }
     public required string CodexComposerBusy { get; init; }
     public required string CodexComposerCancelled { get; init; }
+    public required string FocusedComposerProbeTitle { get; init; }
+    public required string FocusedComposerProbeInstructions { get; init; }
+    public required string FocusedComposerProbeHotkey { get; init; }
+    public required string FocusedComposerProbePrepare { get; init; }
+    public required string FocusedComposerProbeRunning { get; init; }
+    public required string FocusedComposerProbeCompleted { get; init; }
+    public required string FocusedComposerProbeNotCodex { get; init; }
+    public required string FocusedComposerProbeUnavailable { get; init; }
+    public required string FocusedComposerProbeTimeout { get; init; }
+    public required string FocusedComposerProbeBusy { get; init; }
+    public required string FocusedComposerProbeCancelled { get; init; }
+    public required string FocusedComposerProbeFailed { get; init; }
     public required string RetryCodex { get; init; }
     public required string CodexRunning { get; init; }
     public required string CodexCancel { get; init; }
@@ -292,6 +304,18 @@ public static class LocalizationService
         CodexComposerProbeTimeout = "Looking for the Codex input box timed out. Make sure a Codex session is open and try again.",
         CodexComposerBusy = "A Codex input operation is already in progress. Please wait and try again.",
         CodexComposerCancelled = "Filling the Codex input box was cancelled.",
+        FocusedComposerProbeTitle = "Focused Composer UIA Probe",
+        FocusedComposerProbeInstructions = "Click the Codex composer first, then press the global hotkey without clicking BlueRelay.",
+        FocusedComposerProbeHotkey = "Hotkey: Ctrl + Alt + B",
+        FocusedComposerProbePrepare = "Prepare composer probe",
+        FocusedComposerProbeRunning = "Reading focused Codex UI Automation metadata…",
+        FocusedComposerProbeCompleted = "Focused element belongs to Codex Desktop.",
+        FocusedComposerProbeNotCodex = "The current focus is not in Codex Desktop.",
+        FocusedComposerProbeUnavailable = "No focused UI Automation element was available.",
+        FocusedComposerProbeTimeout = "Focused composer probe timed out. Try again with the Codex composer focused.",
+        FocusedComposerProbeBusy = "A focused composer probe is already running.",
+        FocusedComposerProbeCancelled = "Focused composer probe was cancelled.",
+        FocusedComposerProbeFailed = "Focused composer probe failed. Try again.",
         RetryCodex = "Retry Codex task",
         CodexRunning = "Codex running",
         CodexCancel = "Cancel Codex task",
@@ -468,6 +492,18 @@ public static class LocalizationService
         CodexComposerProbeTimeout = "查找 Codex 输入框超时，请确认 Codex 会话已打开后重试。",
         CodexComposerBusy = "已有一次 Codex 输入操作正在进行，请稍候再试。",
         CodexComposerCancelled = "已取消填入 Codex。",
+        FocusedComposerProbeTitle = "焦点 Composer UIA 诊断",
+        FocusedComposerProbeInstructions = "请先点击 Codex 输入框，再在不点击 BlueRelay 的情况下按全局热键。",
+        FocusedComposerProbeHotkey = "热键：Ctrl + Alt + B",
+        FocusedComposerProbePrepare = "准备诊断 Codex 输入框",
+        FocusedComposerProbeRunning = "正在读取当前焦点的 Codex UI Automation 元数据…",
+        FocusedComposerProbeCompleted = "当前焦点元素属于 Codex Desktop。",
+        FocusedComposerProbeNotCodex = "当前焦点不在 Codex Desktop。",
+        FocusedComposerProbeUnavailable = "当前没有可用的焦点 UI Automation 元素。",
+        FocusedComposerProbeTimeout = "焦点 Composer 诊断超时，请保持 Codex 输入框获得焦点后重试。",
+        FocusedComposerProbeBusy = "已有一次焦点 Composer 诊断正在进行。",
+        FocusedComposerProbeCancelled = "已取消焦点 Composer 诊断。",
+        FocusedComposerProbeFailed = "焦点 Composer 诊断失败，请重试。",
         RetryCodex = "重试发送给 Codex",
         CodexRunning = "Codex 运行中",
         CodexCancel = "取消 Codex 任务",

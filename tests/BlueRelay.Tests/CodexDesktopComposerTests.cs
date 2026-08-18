@@ -177,6 +177,71 @@ public sealed class CodexDesktopComposerTests
         Assert.AreEqual(ApartmentState.STA, apartmentState);
     }
 
+    [TestMethod]
+    public void FocusedProbeDisplayContainsStructureButNoValuePayload()
+    {
+        var metadata = new FocusedComposerElementMetadata(
+            42,
+            new IntPtr(100),
+            "Document",
+            "document",
+            "message-editor",
+            "Chrome_RenderWidgetHostHWND",
+            "随心输入",
+            "Chromium",
+            true,
+            true,
+            true,
+            false,
+            new UiAutomationBounds(10, 700, 600, 80),
+            ["TextPattern", "TextPattern2"]);
+        var result = new FocusedComposerProbeResult(
+            true,
+            "focused_codex_element",
+            "Focused element belongs to Codex Desktop.",
+            metadata,
+            [],
+            new FocusedComposerWindowMetadata(42, new IntPtr(100), "Codex", "Chrome_WidgetWin_1", "Codex", true),
+            TimeSpan.FromMilliseconds(12));
+
+        var display = result.ToDisplayText();
+
+        StringAssert.Contains(display, "ControlType=Document");
+        StringAssert.Contains(display, "FrameworkId=Chromium");
+        StringAssert.Contains(display, "Patterns=[TextPattern, TextPattern2]");
+        StringAssert.Contains(display, "Name=随心输入");
+        Assert.IsFalse(display.Contains("Value=", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void FocusedProbeParentDepthIsExplicitlyBounded()
+    {
+        Assert.AreEqual(10, FocusedComposerProbeService.MaxParentDepth);
+    }
+
+    [TestMethod]
+    public async Task SlowFocusedProbeTimesOutWithoutBlockingCaller()
+    {
+        var service = new FocusedComposerProbeService(
+            TimeSpan.FromMilliseconds(60),
+            _ => Task.Run(() =>
+            {
+                Thread.Sleep(300);
+                return FocusedComposerProbeResult.Failed(
+                    "fake_completed_late",
+                    "late",
+                    TimeSpan.FromMilliseconds(300));
+            }));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await service.ProbeAsync();
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual("focused_probe_timeout", result.Code);
+        Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromMilliseconds(250));
+        Thread.Sleep(300);
+    }
+
     private static CodexComposerOperationCoordinator CreateCoordinator(TimeSpan timeout)
     {
         return new CodexComposerOperationCoordinator(

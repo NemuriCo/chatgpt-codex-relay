@@ -26,6 +26,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly BrowserBridgeService _browserBridge;
     private readonly ICodexBridge? _codexBridge;
     private readonly ICodexDesktopComposerInjector _codexDesktopComposerInjector;
+    private readonly FocusedComposerProbeService _focusedComposerProbeService;
     private readonly RelayCommand _editProjectCommand;
     private readonly RelayCommand _deleteProjectCommand;
     private readonly RelayCommand _saveProjectCommand;
@@ -39,6 +40,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _selectWorkstreamCommand;
     private readonly RelayCommand _confirmTaskCommand;
     private readonly RelayCommand _fillCodexCommand;
+    private readonly RelayCommand _prepareFocusedComposerProbeCommand;
     private readonly RelayCommand _cancelCodexTaskCommand;
     private readonly RelayCommand _resetCodexThreadCommand;
     private readonly RelayCommand _newCodexSessionAndRetryCommand;
@@ -84,6 +86,8 @@ public sealed class MainViewModel : ObservableObject
     private bool _isTaskDetailOpen;
     private ProjectListItemViewModel? _taskDetailWorkstream;
     private string _simulatedResultText = string.Empty;
+    private string _focusedComposerProbeDiagnostics = string.Empty;
+    private bool _isFocusedComposerProbeRunning;
     private WorkflowState _manualState;
 
     public MainViewModel(
@@ -105,7 +109,8 @@ public sealed class MainViewModel : ObservableObject
         string? loadWarning,
         BrowserBridgeService? browserBridge = null,
         ICodexBridge? codexBridge = null,
-        ICodexDesktopComposerInjector? codexDesktopComposerInjector = null)
+        ICodexDesktopComposerInjector? codexDesktopComposerInjector = null,
+        FocusedComposerProbeService? focusedComposerProbeService = null)
     {
         _state = state;
         _projectService = projectService;
@@ -115,6 +120,7 @@ public sealed class MainViewModel : ObservableObject
         _browserBridge = browserBridge ?? new BrowserBridgeService(state, projectService);
         _codexBridge = codexBridge ?? _browserBridge.CodexBridge;
         _codexDesktopComposerInjector = codexDesktopComposerInjector ?? new WindowsCodexDesktopComposerInjector();
+        _focusedComposerProbeService = focusedComposerProbeService ?? new FocusedComposerProbeService();
         Ui = LocalizationService.Current;
         _isAlwaysOnTop = state.IsAlwaysOnTop;
 
@@ -130,6 +136,7 @@ public sealed class MainViewModel : ObservableObject
         _selectWorkstreamCommand = new RelayCommand(SelectWorkstream);
         _confirmTaskCommand = new RelayCommand(ConfirmTaskAsync, CanRunTaskAction);
         _fillCodexCommand = new RelayCommand(FillCodexAsync, CanRunTaskAction);
+        _prepareFocusedComposerProbeCommand = new RelayCommand(PrepareFocusedComposerProbe);
         _cancelCodexTaskCommand = new RelayCommand(CancelCodexTaskAsync, CanCancelCodexTask);
         _resetCodexThreadCommand = new RelayCommand(ResetCodexThreadAsync, CanSelectWorkstream);
         _newCodexSessionAndRetryCommand = new RelayCommand(NewCodexSessionAndRetryAsync, CanSelectWorkstream);
@@ -232,6 +239,8 @@ public sealed class MainViewModel : ObservableObject
     public ICommand ConfirmTaskCommand => _confirmTaskCommand;
 
     public ICommand FillCodexCommand => _fillCodexCommand;
+
+    public ICommand PrepareFocusedComposerProbeCommand => _prepareFocusedComposerProbeCommand;
 
     public ICommand CancelCodexTaskCommand => _cancelCodexTaskCommand;
 
@@ -621,6 +630,26 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public bool HasStatusMessage => !string.IsNullOrWhiteSpace(StatusMessage);
+
+    public string FocusedComposerProbeDiagnostics
+    {
+        get => _focusedComposerProbeDiagnostics;
+        private set
+        {
+            if (SetProperty(ref _focusedComposerProbeDiagnostics, value))
+            {
+                OnPropertyChanged(nameof(HasFocusedComposerProbeDiagnostics));
+            }
+        }
+    }
+
+    public bool HasFocusedComposerProbeDiagnostics => !string.IsNullOrWhiteSpace(FocusedComposerProbeDiagnostics);
+
+    public bool IsFocusedComposerProbeRunning
+    {
+        get => _isFocusedComposerProbeRunning;
+        private set => SetProperty(ref _isFocusedComposerProbeRunning, value);
+    }
 
     public bool HasErrorStatus => HasStatusMessage && StatusIsError;
 
@@ -1387,6 +1416,61 @@ public sealed class MainViewModel : ObservableObject
 
         RefreshData(item.ProjectId, item.Id);
         SetStatus(_codexBridge is null ? Ui.CodexSimulationStarted : Ui.CodexRunning);
+    }
+
+    private void PrepareFocusedComposerProbe()
+    {
+        IsProjectManagementOpen = true;
+        FocusedComposerProbeDiagnostics =
+            $"{Ui.FocusedComposerProbeInstructions}{Environment.NewLine}{Ui.FocusedComposerProbeHotkey}";
+        SetStatus(Ui.FocusedComposerProbeInstructions);
+    }
+
+    public async Task RunFocusedComposerProbeAsync(CancellationToken cancellationToken = default)
+    {
+        if (IsFocusedComposerProbeRunning)
+        {
+            return;
+        }
+
+        IsProjectManagementOpen = true;
+        IsFocusedComposerProbeRunning = true;
+        FocusedComposerProbeDiagnostics = Ui.FocusedComposerProbeRunning;
+        try
+        {
+            var result = await _focusedComposerProbeService.ProbeAsync(cancellationToken);
+            FocusedComposerProbeDiagnostics = result.ToDisplayText();
+            SetStatus(GetFocusedComposerProbeStatus(result), isError: !result.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            FocusedComposerProbeDiagnostics = Ui.FocusedComposerProbeCancelled;
+            SetStatus(Ui.FocusedComposerProbeCancelled, isError: true);
+        }
+        catch (Exception exception)
+        {
+            StartupDiagnostics.WriteException("Focused composer probe command", exception);
+            FocusedComposerProbeDiagnostics = Ui.FocusedComposerProbeFailed;
+            SetStatus(Ui.FocusedComposerProbeFailed, isError: true);
+        }
+        finally
+        {
+            IsFocusedComposerProbeRunning = false;
+        }
+    }
+
+    private string GetFocusedComposerProbeStatus(FocusedComposerProbeResult result)
+    {
+        return result.Code switch
+        {
+            "focused_codex_element" => Ui.FocusedComposerProbeCompleted,
+            "focused_not_codex" => Ui.FocusedComposerProbeNotCodex,
+            "focused_element_unavailable" => Ui.FocusedComposerProbeUnavailable,
+            "focused_probe_timeout" => Ui.FocusedComposerProbeTimeout,
+            "focused_probe_busy" => Ui.FocusedComposerProbeBusy,
+            "focused_probe_cancelled" => Ui.FocusedComposerProbeCancelled,
+            _ => Ui.FocusedComposerProbeFailed
+        };
     }
 
     private async Task FillCodexAsync(object? parameter)

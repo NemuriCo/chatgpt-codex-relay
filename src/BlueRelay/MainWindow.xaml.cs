@@ -24,9 +24,17 @@ public partial class MainWindow : Window
     private const double MaximumWindowHeight = 900;
     private const int DwmWindowCornerPreference = 33;
     private const int DwmCornerRound = 2;
+    private const int FocusedComposerProbeHotKeyId = 0x4252;
+    private const int WmHotKey = 0x0312;
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+    private const uint ModNoRepeat = 0x4000;
+    private const uint VirtualKeyB = 0x42;
     private bool _allowClose;
     private bool _isRestoringPosition;
+    private bool _focusedComposerProbeHotKeyRegistered;
     private MainViewModel? _viewModel;
+    private HwndSource? _windowSource;
     private readonly DispatcherTimer _windowSettingsSaveTimer;
 
     public MainWindow()
@@ -65,8 +73,49 @@ public partial class MainWindow : Window
     private void Window_SourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
+        _windowSource = HwndSource.FromHwnd(handle);
+        _windowSource?.AddHook(WindowMessageHook);
+        _focusedComposerProbeHotKeyRegistered = RegisterHotKey(
+            handle,
+            FocusedComposerProbeHotKeyId,
+            ModControl | ModAlt | ModNoRepeat,
+            VirtualKeyB);
+        if (!_focusedComposerProbeHotKeyRegistered)
+        {
+            StartupDiagnostics.Write($"Focused composer probe hotkey registration failed error={Marshal.GetLastWin32Error()}");
+        }
+
         var preference = DwmCornerRound;
         _ = DwmSetWindowAttribute(handle, DwmWindowCornerPreference, ref preference, sizeof(int));
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (_focusedComposerProbeHotKeyRegistered)
+        {
+            UnregisterHotKey(handle, FocusedComposerProbeHotKeyId);
+            _focusedComposerProbeHotKeyRegistered = false;
+        }
+
+        _windowSource?.RemoveHook(WindowMessageHook);
+        base.OnClosed(e);
+    }
+
+    private IntPtr WindowMessageHook(
+        IntPtr hwnd,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam,
+        ref bool handled)
+    {
+        if (message == WmHotKey && wParam.ToInt64() == FocusedComposerProbeHotKeyId)
+        {
+            _ = _viewModel?.RunFocusedComposerProbeAsync();
+            handled = true;
+        }
+
+        return IntPtr.Zero;
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -394,4 +443,12 @@ public partial class MainWindow : Window
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int valueSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint virtualKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 }
