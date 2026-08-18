@@ -199,7 +199,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
 
         if (!allowReplacingExistingText)
         {
-            var contentState = ReadExistingContent(target);
+            var contentState = ReadExistingContent(target, selected);
             if (CodexComposerContentGuard.RequiresConfirmation(contentState, allowReplacingExistingText: false))
             {
                 CodexComposerDiagnostics.WriteStage(
@@ -847,32 +847,77 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         }
     }
 
-    private static CodexComposerContentState ReadExistingContent(AutomationElement target)
+    private static CodexComposerContentState ReadExistingContent(
+        AutomationElement target,
+        CodexComposerCandidate candidate)
     {
+        var valuePatternAvailable = false;
+        var textPatternAvailable = false;
+        string? value = null;
+        string? text = null;
+
         try
         {
-            if (!target.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
+            if (target.TryGetCurrentPattern(TextPattern.Pattern, out var pattern))
             {
-                return CodexComposerContentState.Unknown;
+                var textPattern = (TextPattern)pattern;
+                text = textPattern.DocumentRange.GetText(-1);
+                textPatternAvailable = true;
             }
-
-            var value = ((ValuePattern)pattern).Current.Value;
-            return string.IsNullOrEmpty(value)
-                ? CodexComposerContentState.Empty
-                : CodexComposerContentState.HasContent;
         }
         catch (ElementNotAvailableException)
         {
-            return CodexComposerContentState.Unknown;
         }
         catch (COMException)
         {
-            return CodexComposerContentState.Unknown;
         }
         catch (InvalidOperationException)
         {
-            return CodexComposerContentState.Unknown;
         }
+
+        try
+        {
+            if (target.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
+            {
+                value = ((ValuePattern)pattern).Current.Value;
+                valuePatternAvailable = true;
+            }
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (COMException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        var isProseMirror = CodexComposerCandidateSelector.HasClassToken(
+            candidate.Metadata.ClassName,
+            "ProseMirror");
+        var contentState = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror,
+            textPatternAvailable,
+            text,
+            valuePatternAvailable,
+            value,
+            candidate.Metadata.Name);
+        var normalizedValue = CodexComposerContentGuard.NormalizeComposerTextForEmptiness(value);
+        var normalizedName = CodexComposerContentGuard.NormalizeComposerTextForEmptiness(candidate.Metadata.Name);
+        var valueEqualsName = valuePatternAvailable &&
+                              normalizedValue.Equals(normalizedName, StringComparison.Ordinal);
+        StartupDiagnostics.Write(
+            $"Codex composer composer_content_probe " +
+            $"valuePatternAvailable={valuePatternAvailable} " +
+            $"valueLength={value?.Length ?? 0} " +
+            $"textPatternAvailable={textPatternAvailable} " +
+            $"textLength={text?.Length ?? 0} " +
+            $"nameLength={candidate.Metadata.Name.Length} " +
+            $"valueEqualsName={valueEqualsName} " +
+            $"className={SanitizeDiagnosticValue(candidate.Metadata.ClassName)} " +
+            $"finalContentState={contentState}");
+        return contentState;
     }
 
     private static CodexComposerInjectionResult PasteWithClipboardFallback(

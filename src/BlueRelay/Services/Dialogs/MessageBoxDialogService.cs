@@ -55,7 +55,6 @@ public sealed class MessageBoxDialogService : IDialogService
             PrimaryButtonAppearance = ControlAppearance.Primary,
             PrimaryButtonIcon = new SymbolIcon(SymbolRegular.Checkmark16),
             SecondaryButtonText = _text.Cancel,
-            CloseButtonText = _text.Cancel,
             ShowTitle = true
         };
 

@@ -451,6 +451,121 @@ public sealed class CodexDesktopComposerTests
     }
 
     [TestMethod]
+    public void EmptyProseMirrorPlaceholderUsesEmptyTextPatternState()
+    {
+        var state = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror: true,
+            textPatternAvailable: true,
+            textPatternText: string.Empty,
+            valuePatternAvailable: true,
+            valuePatternValue: "随心输入",
+            accessibilityName: "随心输入");
+
+        Assert.AreEqual(CodexComposerContentState.Empty, state);
+    }
+
+    [TestMethod]
+    public void EnglishProseMirrorPlaceholderDoesNotDependOnLocalizedText()
+    {
+        var state = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror: true,
+            textPatternAvailable: true,
+            textPatternText: string.Empty,
+            valuePatternAvailable: true,
+            valuePatternValue: "Ask anything",
+            accessibilityName: "Ask anything");
+
+        Assert.AreEqual(CodexComposerContentState.Empty, state);
+    }
+
+    [TestMethod]
+    public void ProseMirrorRealTextIsHasContentEvenWithPlaceholderLikeName()
+    {
+        var state = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror: true,
+            textPatternAvailable: true,
+            textPatternText: "hello",
+            valuePatternAvailable: true,
+            valuePatternValue: "hello",
+            accessibilityName: "随心输入");
+
+        Assert.AreEqual(CodexComposerContentState.HasContent, state);
+    }
+
+    [TestMethod]
+    public void ProseMirrorRealTextWithEmptyNameIsHasContent()
+    {
+        var state = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror: true,
+            textPatternAvailable: true,
+            textPatternText: "hello",
+            valuePatternAvailable: true,
+            valuePatternValue: "hello",
+            accessibilityName: string.Empty);
+
+        Assert.AreEqual(CodexComposerContentState.HasContent, state);
+    }
+
+    [TestMethod]
+    public void EmptyParagraphAndZeroWidthTextAreEmpty()
+    {
+        foreach (var text in new[] { string.Empty, "\r\n", "\n", "\u200B\u200C\u200D\u2060\uFEFF" })
+        {
+            var state = CodexComposerContentGuard.DetermineContentState(
+                isProseMirror: true,
+                textPatternAvailable: true,
+                textPatternText: text,
+                valuePatternAvailable: true,
+                valuePatternValue: "随心输入",
+                accessibilityName: "随心输入");
+
+            Assert.AreEqual(CodexComposerContentState.Empty, state, $"Unexpected state for escaped text {text.Length}.");
+        }
+    }
+
+    [TestMethod]
+    public void ValuePatternIsFallbackWhenTextPatternIsUnavailable()
+    {
+        var state = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror: true,
+            textPatternAvailable: false,
+            textPatternText: null,
+            valuePatternAvailable: true,
+            valuePatternValue: "hello",
+            accessibilityName: string.Empty);
+
+        Assert.AreEqual(CodexComposerContentState.HasContent, state);
+    }
+
+    [TestMethod]
+    public void ProseMirrorPlaceholderUsesValueNameFallbackWithoutChineseLiteral()
+    {
+        var state = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror: true,
+            textPatternAvailable: false,
+            textPatternText: null,
+            valuePatternAvailable: true,
+            valuePatternValue: "Ask anything",
+            accessibilityName: "Ask anything");
+
+        Assert.AreEqual(CodexComposerContentState.Empty, state);
+    }
+
+    [TestMethod]
+    public void UnknownIsReturnedWhenNeitherPatternCanBeRead()
+    {
+        var state = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror: true,
+            textPatternAvailable: false,
+            textPatternText: null,
+            valuePatternAvailable: false,
+            valuePatternValue: null,
+            accessibilityName: "随心输入");
+
+        Assert.AreEqual(CodexComposerContentState.Unknown, state);
+    }
+
+    [TestMethod]
     public void FocusedChromeNodeCanResolveCodexWindowByPidWithoutItsOwnHwnd()
     {
         var candidates = new[]

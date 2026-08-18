@@ -107,6 +107,57 @@ public static class CodexComposerContentGuard
         CodexComposerContentState state,
         bool allowReplacingExistingText) =>
         !allowReplacingExistingText && state is not CodexComposerContentState.Empty;
+
+    public static CodexComposerContentState DetermineContentState(
+        bool isProseMirror,
+        bool textPatternAvailable,
+        string? textPatternText,
+        bool valuePatternAvailable,
+        string? valuePatternValue,
+        string? accessibilityName)
+    {
+        if (isProseMirror && textPatternAvailable)
+        {
+            return string.IsNullOrEmpty(NormalizeComposerTextForEmptiness(textPatternText))
+                ? CodexComposerContentState.Empty
+                : CodexComposerContentState.HasContent;
+        }
+
+        if (!valuePatternAvailable)
+        {
+            return CodexComposerContentState.Unknown;
+        }
+
+        var value = NormalizeComposerTextForEmptiness(valuePatternValue);
+        if (value.Length == 0)
+        {
+            return CodexComposerContentState.Empty;
+        }
+
+        var name = NormalizeComposerTextForEmptiness(accessibilityName);
+        if (isProseMirror && name.Length > 0 && value.Equals(name, StringComparison.Ordinal))
+        {
+            return CodexComposerContentState.Empty;
+        }
+
+        return CodexComposerContentState.HasContent;
+    }
+
+    public static string NormalizeComposerTextForEmptiness(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return new string(value
+                .Where(character => !IsZeroWidthCharacter(character))
+                .ToArray())
+            .Trim();
+    }
+
+    private static bool IsZeroWidthCharacter(char character) =>
+        character is '\u200B' or '\u200C' or '\u200D' or '\u2060' or '\uFEFF';
 }
 
 public static class CodexComposerDiagnostics
