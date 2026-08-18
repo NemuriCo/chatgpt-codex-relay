@@ -6,6 +6,8 @@ using BlueRelay.Services;
 using BlueRelay.Services.Bridges;
 using BlueRelay.Services.Dialogs;
 using BlueRelay.Services.Codex;
+using BlueRelay.Services.Desktop;
+using BlueRelay.Diagnostics;
 using System.Windows;
 using WpfApplication = System.Windows.Application;
 using Wpf.Ui.Controls;
@@ -23,6 +25,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IGitRepositoryDetector _gitRepositoryDetector;
     private readonly BrowserBridgeService _browserBridge;
     private readonly ICodexBridge? _codexBridge;
+    private readonly ICodexDesktopComposerInjector _codexDesktopComposerInjector;
     private readonly RelayCommand _editProjectCommand;
     private readonly RelayCommand _deleteProjectCommand;
     private readonly RelayCommand _saveProjectCommand;
@@ -35,6 +38,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _selectProjectCommand;
     private readonly RelayCommand _selectWorkstreamCommand;
     private readonly RelayCommand _confirmTaskCommand;
+    private readonly RelayCommand _fillCodexCommand;
     private readonly RelayCommand _cancelCodexTaskCommand;
     private readonly RelayCommand _resetCodexThreadCommand;
     private readonly RelayCommand _newCodexSessionAndRetryCommand;
@@ -100,7 +104,8 @@ public sealed class MainViewModel : ObservableObject
         IGitRepositoryDetector gitRepositoryDetector,
         string? loadWarning,
         BrowserBridgeService? browserBridge = null,
-        ICodexBridge? codexBridge = null)
+        ICodexBridge? codexBridge = null,
+        ICodexDesktopComposerInjector? codexDesktopComposerInjector = null)
     {
         _state = state;
         _projectService = projectService;
@@ -109,6 +114,7 @@ public sealed class MainViewModel : ObservableObject
         _gitRepositoryDetector = gitRepositoryDetector;
         _browserBridge = browserBridge ?? new BrowserBridgeService(state, projectService);
         _codexBridge = codexBridge ?? _browserBridge.CodexBridge;
+        _codexDesktopComposerInjector = codexDesktopComposerInjector ?? new WindowsCodexDesktopComposerInjector();
         Ui = LocalizationService.Current;
         _isAlwaysOnTop = state.IsAlwaysOnTop;
 
@@ -123,6 +129,7 @@ public sealed class MainViewModel : ObservableObject
         _selectProjectCommand = new RelayCommand(SelectProject);
         _selectWorkstreamCommand = new RelayCommand(SelectWorkstream);
         _confirmTaskCommand = new RelayCommand(ConfirmTaskAsync, CanRunTaskAction);
+        _fillCodexCommand = new RelayCommand(FillCodexAsync, CanRunTaskAction);
         _cancelCodexTaskCommand = new RelayCommand(CancelCodexTaskAsync, CanCancelCodexTask);
         _resetCodexThreadCommand = new RelayCommand(ResetCodexThreadAsync, CanSelectWorkstream);
         _newCodexSessionAndRetryCommand = new RelayCommand(NewCodexSessionAndRetryAsync, CanSelectWorkstream);
@@ -223,6 +230,8 @@ public sealed class MainViewModel : ObservableObject
     public ICommand ToggleAlwaysOnTopCommand { get; }
 
     public ICommand ConfirmTaskCommand => _confirmTaskCommand;
+
+    public ICommand FillCodexCommand => _fillCodexCommand;
 
     public ICommand CancelCodexTaskCommand => _cancelCodexTaskCommand;
 
@@ -1380,6 +1389,63 @@ public sealed class MainViewModel : ObservableObject
         SetStatus(_codexBridge is null ? Ui.CodexSimulationStarted : Ui.CodexRunning);
     }
 
+    private async Task FillCodexAsync(object? parameter)
+    {
+        if (parameter is not ProjectListItemViewModel item || item.CurrentTask is not { } task)
+        {
+            return;
+        }
+
+        CodexComposerDiagnostics.WriteStage("fill_clicked");
+        SetStatus(Ui.CodexComposerSearching);
+        var prompt = RelayPromptComposer.Compose(task.UserNote, task.Prompt);
+        CodexComposerInjectionResult result;
+        try
+        {
+            result = await _codexDesktopComposerInjector.InjectAsync(prompt);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus(Ui.CodexComposerCancelled, isError: true);
+            return;
+        }
+        catch (Exception exception)
+        {
+            StartupDiagnostics.WriteException("Fill Codex command", exception);
+            SetStatus(Ui.CodexComposerInjectionFailed, isError: true);
+            return;
+        }
+
+        if (!result.Success)
+        {
+            SetStatus(GetComposerFailureMessage(result), isError: true);
+            return;
+        }
+
+        SetStatus(result.ClipboardRestoreFailed
+            ? Ui.CodexComposerFilledClipboardRestoreFailed
+            : Ui.CodexComposerFilled);
+    }
+
+    private string GetComposerFailureMessage(CodexComposerInjectionResult result)
+    {
+        if (result.ClipboardRestoreFailed)
+        {
+            return Ui.CodexComposerClipboardRestoreFailed;
+        }
+
+        return result.Code switch
+        {
+            "codex_composer_not_found" => Ui.CodexComposerNotFound,
+            "codex_composer_probe_timeout" => Ui.CodexComposerProbeTimeout,
+            "codex_composer_busy" => Ui.CodexComposerBusy,
+            "codex_composer_cancelled" => Ui.CodexComposerCancelled,
+            "codex_clipboard_unsafe" => Ui.CodexComposerClipboardUnsafe,
+            "codex_task_empty" => Ui.CodexComposerTaskEmpty,
+            _ => Ui.CodexComposerInjectionFailed
+        };
+    }
+
     private async Task CancelCodexTaskAsync(object? parameter)
     {
         if (parameter is not ProjectListItemViewModel item)
@@ -1739,6 +1805,7 @@ public sealed class MainViewModel : ObservableObject
         _saveWorkstreamCommand.RaiseCanExecuteChanged();
         _cancelWorkstreamEditCommand.RaiseCanExecuteChanged();
         _confirmTaskCommand.RaiseCanExecuteChanged();
+        _fillCodexCommand.RaiseCanExecuteChanged();
         _cancelCodexTaskCommand.RaiseCanExecuteChanged();
         _resetCodexThreadCommand.RaiseCanExecuteChanged();
         _newCodexSessionAndRetryCommand.RaiseCanExecuteChanged();

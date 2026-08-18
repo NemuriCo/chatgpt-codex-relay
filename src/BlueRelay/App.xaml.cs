@@ -6,6 +6,7 @@ using BlueRelay.Presentation.ViewModels;
 using BlueRelay.Services;
 using BlueRelay.Services.Bridges;
 using BlueRelay.Services.Codex;
+using BlueRelay.Services.Desktop;
 using BlueRelay.Services.Dialogs;
 
 using WpfMessageBox = System.Windows.MessageBox;
@@ -72,6 +73,7 @@ public partial class App : WpfApplication
             StartupDiagnostics.Write("BrowserBridgeService initialized");
 
             StartupDiagnostics.Write("Constructing MainViewModel");
+            var codexDesktopComposerInjector = new WindowsCodexDesktopComposerInjector();
             _mainViewModel = new MainViewModel(
                 loadResult.State,
                 projectService,
@@ -80,7 +82,8 @@ public partial class App : WpfApplication
                 new GitRepositoryDetector(),
                 startupWarning,
                 browserBridge,
-                codexBridge);
+                codexBridge,
+                codexDesktopComposerInjector);
             StartupDiagnostics.Write("MainViewModel initialized");
 
             var bridgeStartResult = await _browserBridgeServer.StartAsync();

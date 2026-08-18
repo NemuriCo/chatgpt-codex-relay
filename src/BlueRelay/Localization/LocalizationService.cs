@@ -103,6 +103,18 @@ public sealed class UiTextSet
     public required string CopyCodexThreadId { get; init; }
     public required string CodexThreadIdCopied { get; init; }
     public required string SendToCodex { get; init; }
+    public required string FillCodex { get; init; }
+    public required string CodexComposerFilled { get; init; }
+    public required string CodexComposerFilledClipboardRestoreFailed { get; init; }
+    public required string CodexComposerClipboardRestoreFailed { get; init; }
+    public required string CodexComposerNotFound { get; init; }
+    public required string CodexComposerClipboardUnsafe { get; init; }
+    public required string CodexComposerTaskEmpty { get; init; }
+    public required string CodexComposerInjectionFailed { get; init; }
+    public required string CodexComposerSearching { get; init; }
+    public required string CodexComposerProbeTimeout { get; init; }
+    public required string CodexComposerBusy { get; init; }
+    public required string CodexComposerCancelled { get; init; }
     public required string RetryCodex { get; init; }
     public required string CodexRunning { get; init; }
     public required string CodexCancel { get; init; }
@@ -268,6 +280,18 @@ public static class LocalizationService
         CopyCodexThreadId = "Copy Codex thread ID",
         CodexThreadIdCopied = "Codex thread ID copied.",
         SendToCodex = "Confirm send",
+        FillCodex = "Fill into Codex",
+        CodexComposerFilled = "Filled into Codex. Review it and send manually.",
+        CodexComposerFilledClipboardRestoreFailed = "Filled into Codex, but the original plain-text clipboard could not be restored.",
+        CodexComposerClipboardRestoreFailed = "Codex filling did not complete, and the original plain-text clipboard could not be restored.",
+        CodexComposerNotFound = "No editable Codex input box was found.\nOpen a Codex session and try again.",
+        CodexComposerClipboardUnsafe = "The clipboard could not be used safely for Codex input. Close other clipboard content and try again.",
+        CodexComposerTaskEmpty = "The current task is empty and could not be filled into Codex.",
+        CodexComposerInjectionFailed = "BlueRelay could not fill the Codex input box. Try again.",
+        CodexComposerSearching = "Looking for the Codex input box…",
+        CodexComposerProbeTimeout = "Looking for the Codex input box timed out. Make sure a Codex session is open and try again.",
+        CodexComposerBusy = "A Codex input operation is already in progress. Please wait and try again.",
+        CodexComposerCancelled = "Filling the Codex input box was cancelled.",
         RetryCodex = "Retry Codex task",
         CodexRunning = "Codex running",
         CodexCancel = "Cancel Codex task",
@@ -432,6 +456,18 @@ public static class LocalizationService
         CopyCodexThreadId = "复制 Codex 线程 ID",
         CodexThreadIdCopied = "Codex 线程 ID 已复制。",
         SendToCodex = "确认发送",
+        FillCodex = "填入 Codex",
+        CodexComposerFilled = "已填入 Codex，等待你检查并发送。",
+        CodexComposerFilledClipboardRestoreFailed = "已填入 Codex，但原纯文本剪贴板未能恢复。",
+        CodexComposerClipboardRestoreFailed = "填入 Codex 未完成，且原纯文本剪贴板未能恢复。",
+        CodexComposerNotFound = "没有找到可编辑的 Codex 输入框。\n请先打开 Codex 会话后重试。",
+        CodexComposerClipboardUnsafe = "无法安全使用剪贴板填入 Codex。请关闭其他剪贴板内容后重试。",
+        CodexComposerTaskEmpty = "当前任务为空，无法填入 Codex。",
+        CodexComposerInjectionFailed = "无法填入 Codex，请重试。",
+        CodexComposerSearching = "正在查找 Codex 输入框…",
+        CodexComposerProbeTimeout = "查找 Codex 输入框超时，请确认 Codex 会话已打开后重试。",
+        CodexComposerBusy = "已有一次 Codex 输入操作正在进行，请稍候再试。",
+        CodexComposerCancelled = "已取消填入 Codex。",
         RetryCodex = "重试发送给 Codex",
         CodexRunning = "Codex 运行中",
         CodexCancel = "取消 Codex 任务",

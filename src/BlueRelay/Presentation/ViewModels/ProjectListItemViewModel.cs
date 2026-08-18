@@ -107,6 +107,10 @@ public sealed class ProjectListItemViewModel : ObservableObject
         (CurrentState is WorkflowState.ReadyForCodex or WorkflowState.NeedsAttention or WorkflowState.Error) &&
         HasCurrentTask;
 
+    public bool CanFillCodex =>
+        (CurrentState is WorkflowState.ReadyForCodex or WorkflowState.NeedsAttention or WorkflowState.Error) &&
+        HasCurrentTask;
+
     public string SendToCodexLabel => CurrentState is WorkflowState.NeedsAttention or WorkflowState.Error
         ? _text.RetryCodex
         : _text.SendToCodex;
@@ -252,6 +256,7 @@ public sealed class ProjectListItemViewModel : ObservableObject
         OnPropertyChanged(nameof(HasCurrentTask));
         OnPropertyChanged(nameof(HasCurrentResult));
         OnPropertyChanged(nameof(CanSendToCodex));
+        OnPropertyChanged(nameof(CanFillCodex));
         OnPropertyChanged(nameof(SendToCodexLabel));
         OnPropertyChanged(nameof(IsCodexRunning));
         OnPropertyChanged(nameof(CanSendToChatGPT));
