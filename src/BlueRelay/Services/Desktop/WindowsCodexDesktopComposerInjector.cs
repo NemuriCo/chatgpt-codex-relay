@@ -337,10 +337,12 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         foreach (var nativeWindow in nativeWindows)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var processName = TryGetProcessName(nativeWindow.ProcessId);
             var processPath = TryGetProcessPath(nativeWindow.ProcessId);
             if (!OpenAiWindowClassifier.IsLikelyOpenAiWindow(
                     nativeWindow.WindowTitle,
                     nativeWindow.ClassName,
+                    processName,
                     processPath))
             {
                 continue;
@@ -349,9 +351,15 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             var score = OpenAiWindowClassifier.Score(
                 nativeWindow.WindowTitle,
                 nativeWindow.ClassName,
+                processName,
                 processPath,
                 nativeWindow.IsForeground);
-            scoredWindows.Add(nativeWindow with { ProcessPath = processPath, Score = score });
+            scoredWindows.Add(nativeWindow with
+            {
+                ProcessName = processName,
+                ProcessPath = processPath,
+                Score = score
+            });
         }
 
         return scoredWindows
@@ -893,6 +901,19 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         }
     }
 
+    private static string TryGetProcessName(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return process.ProcessName;
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
+    }
+
     private static async Task ObserveWorkerAsync(Task workerTask, string operationName)
     {
         try
@@ -951,7 +972,8 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         string? ProcessPath,
         UiAutomationBounds Bounds,
         bool IsForeground,
-        int Score = 0);
+        int Score = 0,
+        string ProcessName = "");
 
     private sealed class ClipboardSnapshot
     {
@@ -1022,14 +1044,15 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         public static bool IsLikelyOpenAiWindow(
             UiAutomationMetadata metadata,
             string? processPath) =>
-            IsLikelyOpenAiWindow(metadata.WindowTitle, metadata.ClassName, processPath);
+            IsLikelyOpenAiWindow(metadata.WindowTitle, metadata.ClassName, string.Empty, processPath);
 
         public static bool IsLikelyOpenAiWindow(
             string windowTitle,
             string className,
+            string processName,
             string? processPath)
         {
-            var signals = $"{windowTitle} {className} {processPath}";
+            var signals = $"{windowTitle} {className} {processName} {processPath}";
             return signals.Contains("openai", StringComparison.OrdinalIgnoreCase) ||
                    signals.Contains("chatgpt", StringComparison.OrdinalIgnoreCase) ||
                    signals.Contains("codex", StringComparison.OrdinalIgnoreCase);
@@ -1038,11 +1061,12 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         public static int Score(
             string windowTitle,
             string className,
+            string processName,
             string? processPath,
             bool isForeground)
         {
             var score = isForeground ? 100 : 0;
-            var signals = $"{windowTitle} {className} {processPath}";
+            var signals = $"{windowTitle} {className} {processName} {processPath}";
             if (signals.Contains("codex", StringComparison.OrdinalIgnoreCase))
             {
                 score += 40;
