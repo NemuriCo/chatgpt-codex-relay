@@ -52,6 +52,7 @@ public sealed class UiTextSet
     public required string Edit { get; init; }
     public required string Delete { get; init; }
     public required string Cancel { get; init; }
+    public required string Replace { get; init; }
     public required string SaveProject { get; init; }
     public required string SaveWorkstream { get; init; }
     public required string Close { get; init; }
@@ -115,6 +116,10 @@ public sealed class UiTextSet
     public required string CodexComposerProbeTimeout { get; init; }
     public required string CodexComposerBusy { get; init; }
     public required string CodexComposerCancelled { get; init; }
+    public required string CodexComposerExistingTextTitle { get; init; }
+    public required string CodexComposerExistingTextMessage { get; init; }
+    public required string CodexComposerContentUnknownTitle { get; init; }
+    public required string CodexComposerContentUnknownMessage { get; init; }
     public required string FocusedComposerProbeTitle { get; init; }
     public required string FocusedComposerProbeInstructions { get; init; }
     public required string FocusedComposerProbeHotkey { get; init; }
@@ -241,6 +246,7 @@ public static class LocalizationService
         Edit = "Edit",
         Delete = "Delete",
         Cancel = "Cancel",
+        Replace = "Replace",
         SaveProject = "Save project",
         SaveWorkstream = "Save workstream",
         Close = "Close",
@@ -304,6 +310,10 @@ public static class LocalizationService
         CodexComposerProbeTimeout = "Looking for the Codex input box timed out. Make sure a Codex session is open and try again.",
         CodexComposerBusy = "A Codex input operation is already in progress. Please wait and try again.",
         CodexComposerCancelled = "Filling the Codex input box was cancelled.",
+        CodexComposerExistingTextTitle = "Replace existing Codex text?",
+        CodexComposerExistingTextMessage = "The Codex composer already contains text. Replace it with the current task? The existing text will be overwritten.",
+        CodexComposerContentUnknownTitle = "Confirm replacing Codex composer content",
+        CodexComposerContentUnknownMessage = "BlueRelay could not safely determine whether the Codex composer is empty. Replace its content only if you are sure.",
         FocusedComposerProbeTitle = "Focused Composer UIA Probe",
         FocusedComposerProbeInstructions = "Click the Codex composer first, then press the global hotkey without clicking BlueRelay.",
         FocusedComposerProbeHotkey = "Hotkey: Ctrl + Alt + B",
@@ -429,6 +439,7 @@ public static class LocalizationService
         Edit = "编辑",
         Delete = "删除",
         Cancel = "取消",
+        Replace = "替换",
         SaveProject = "保存项目",
         SaveWorkstream = "保存工作流",
         Close = "关闭",
@@ -492,6 +503,10 @@ public static class LocalizationService
         CodexComposerProbeTimeout = "查找 Codex 输入框超时，请确认 Codex 会话已打开后重试。",
         CodexComposerBusy = "已有一次 Codex 输入操作正在进行，请稍候再试。",
         CodexComposerCancelled = "已取消填入 Codex。",
+        CodexComposerExistingTextTitle = "替换 Codex 中已有文字？",
+        CodexComposerExistingTextMessage = "Codex 输入框中已有文字。要用当前任务替换它吗？现有文字会被覆盖。",
+        CodexComposerContentUnknownTitle = "确认替换 Codex 输入框内容",
+        CodexComposerContentUnknownMessage = "BlueRelay 无法安全确认 Codex 输入框是否为空。只有确定要替换时才继续。",
         FocusedComposerProbeTitle = "焦点 Composer UIA 诊断",
         FocusedComposerProbeInstructions = "请先点击 Codex 输入框，再在不点击 BlueRelay 的情况下按全局热键。",
         FocusedComposerProbeHotkey = "热键：Ctrl + Alt + B",

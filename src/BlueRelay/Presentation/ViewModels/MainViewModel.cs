@@ -1502,6 +1502,44 @@ public sealed class MainViewModel : ObservableObject
 
         if (!result.Success)
         {
+            if (result.Code is "codex_composer_existing_text" or "codex_composer_content_unknown")
+            {
+                var replaceConfirmed = await AskOnUiThreadAsync(
+                    result.Code == "codex_composer_existing_text"
+                        ? Ui.CodexComposerExistingTextTitle
+                        : Ui.CodexComposerContentUnknownTitle,
+                    result.Code == "codex_composer_existing_text"
+                        ? Ui.CodexComposerExistingTextMessage
+                        : Ui.CodexComposerContentUnknownMessage,
+                    Ui.Replace);
+                if (!replaceConfirmed)
+                {
+                    SetStatus(Ui.CodexComposerCancelled);
+                    return;
+                }
+
+                try
+                {
+                    result = await _codexDesktopComposerInjector.InjectAsync(
+                        prompt,
+                        allowReplacingExistingText: true);
+                }
+                catch (OperationCanceledException)
+                {
+                    SetStatus(Ui.CodexComposerCancelled, isError: true);
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    StartupDiagnostics.WriteException("Fill Codex replacement command", exception);
+                    SetStatus(Ui.CodexComposerInjectionFailed, isError: true);
+                    return;
+                }
+            }
+        }
+
+        if (!result.Success)
+        {
             SetStatus(GetComposerFailureMessage(result), isError: true);
             return;
         }

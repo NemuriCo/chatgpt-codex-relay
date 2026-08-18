@@ -63,7 +63,8 @@ public sealed class CodexDesktopComposerTests
             "",
             supportsValuePattern: false,
             supportsTextPattern: true,
-            parentHierarchy: "Pane#composer-container > Document");
+            parentHierarchy: "Pane#composer-container > Document",
+            frameworkId: "Win32");
 
         Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([candidate], out var selected));
         Assert.AreSame(candidate, selected);
@@ -117,6 +118,8 @@ public sealed class CodexDesktopComposerTests
 
         Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([composer, unrelatedChromeEdit], out var selected));
         Assert.AreSame(composer, selected);
+        Assert.IsTrue(CodexComposerCandidateSelector.IsHighConfidence(composer));
+        Assert.IsFalse(CodexComposerCandidateSelector.IsHighConfidence(unrelatedChromeEdit));
     }
 
     [TestMethod]
@@ -167,6 +170,85 @@ public sealed class CodexDesktopComposerTests
 
         Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([candidate], out var selected));
         Assert.IsTrue(selected!.IsValueReadOnly);
+    }
+
+    [TestMethod]
+    public void WritableValuePatternIsPreferredOverReadOnlyCandidate()
+    {
+        var writable = Candidate(
+            100,
+            "Edit",
+            "",
+            "",
+            supportsValuePattern: true,
+            className: "ProseMirror");
+        var readOnly = writable with { IsValueReadOnly = true };
+
+        Assert.IsTrue(CodexComposerCandidateSelector.Score(writable) > CodexComposerCandidateSelector.Score(readOnly));
+    }
+
+    [TestMethod]
+    public void OffscreenAndDisabledProseMirrorCandidatesAreRejected()
+    {
+        var offscreen = Candidate(
+            100,
+            "Edit",
+            "",
+            "",
+            supportsValuePattern: true,
+            className: "ProseMirror",
+            isOffscreen: true);
+        var disabled = Candidate(
+            100,
+            "Edit",
+            "",
+            "",
+            supportsValuePattern: true,
+            className: "ProseMirror",
+            isEnabled: false);
+
+        Assert.IsFalse(CodexComposerCandidateSelector.TrySelect([offscreen], out _));
+        Assert.IsFalse(CodexComposerCandidateSelector.TrySelect([disabled], out _));
+    }
+
+    [TestMethod]
+    public void MultipleEditCandidatesAreResolvedByComposerConfidence()
+    {
+        var composer = Candidate(
+            100,
+            "Edit",
+            "",
+            "",
+            supportsValuePattern: true,
+            className: "ProseMirror");
+        var weakerEdit = Candidate(
+            100,
+            "Edit",
+            "message-input",
+            "",
+            supportsValuePattern: true,
+            className: "Chrome_RenderWidgetHostHWND",
+            parentHierarchy: "Group@RichTextInput");
+
+        Assert.IsTrue(CodexComposerCandidateSelector.TrySelect([weakerEdit, composer], out var selected));
+        Assert.AreSame(composer, selected);
+    }
+
+    [TestMethod]
+    public void ExistingComposerContentRequiresExplicitReplacementConfirmation()
+    {
+        Assert.IsFalse(CodexComposerContentGuard.RequiresConfirmation(
+            CodexComposerContentState.Empty,
+            allowReplacingExistingText: false));
+        Assert.IsTrue(CodexComposerContentGuard.RequiresConfirmation(
+            CodexComposerContentState.HasContent,
+            allowReplacingExistingText: false));
+        Assert.IsTrue(CodexComposerContentGuard.RequiresConfirmation(
+            CodexComposerContentState.Unknown,
+            allowReplacingExistingText: false));
+        Assert.IsFalse(CodexComposerContentGuard.RequiresConfirmation(
+            CodexComposerContentState.HasContent,
+            allowReplacingExistingText: true));
     }
 
     [TestMethod]
@@ -397,7 +479,9 @@ public sealed class CodexDesktopComposerTests
         string parentHierarchy = "Pane#conversation > Document#message-editor",
         bool supportsTextPattern = false,
         string className = "",
-        string frameworkId = "Chrome")
+        string frameworkId = "Chrome",
+        bool isEnabled = true,
+        bool isOffscreen = false)
     {
         var bounds = new UiAutomationBounds(10, 700, 600, 80);
         var metadata = new UiAutomationMetadata(
@@ -409,9 +493,9 @@ public sealed class CodexDesktopComposerTests
             name,
             className,
             frameworkId,
+            isEnabled,
             true,
-            true,
-            false,
+            isOffscreen,
             bounds,
             new UiAutomationBounds(0, 0, 800, 800),
             parentHierarchy,

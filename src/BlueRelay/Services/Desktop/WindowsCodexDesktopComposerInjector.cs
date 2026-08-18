@@ -68,7 +68,8 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
 
     public Task<CodexComposerInjectionResult> InjectAsync(
         string text,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowReplacingExistingText = false)
     {
         if (string.IsNullOrEmpty(text))
         {
@@ -82,7 +83,11 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             () =>
             {
                 CodexComposerDiagnostics.WriteStage("worker_started", stopwatch);
-                return InjectOnWorker(text, cancellationToken, stopwatch);
+                return InjectOnWorker(
+                    text,
+                    cancellationToken,
+                    stopwatch,
+                    allowReplacingExistingText);
             },
             cancellationToken);
     }
@@ -90,7 +95,8 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
     private static CodexComposerInjectionResult InjectOnWorker(
         string text,
         CancellationToken cancellationToken,
-        Stopwatch stopwatch)
+        Stopwatch stopwatch,
+        bool allowReplacingExistingText)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -172,6 +178,26 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         }
 
         CodexComposerDiagnostics.WriteStage("focus_success", stopwatch);
+
+        if (!allowReplacingExistingText)
+        {
+            var contentState = ReadExistingContent(target);
+            if (CodexComposerContentGuard.RequiresConfirmation(contentState, allowReplacingExistingText: false))
+            {
+                CodexComposerDiagnostics.WriteStage(
+                    contentState == CodexComposerContentState.HasContent
+                        ? "existing_content_detected"
+                        : "existing_content_unknown",
+                    stopwatch);
+                return CodexComposerInjectionResult.Failed(
+                    contentState == CodexComposerContentState.HasContent
+                        ? "codex_composer_existing_text"
+                        : "codex_composer_content_unknown",
+                    contentState == CodexComposerContentState.HasContent
+                        ? "The Codex composer already contains text."
+                        : "The Codex composer content could not be inspected safely.");
+            }
+        }
 
         CodexComposerDiagnostics.WriteStage("write_started", stopwatch);
         try
@@ -410,9 +436,15 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                             patternInfo.IsValueReadOnly,
                             0,
                             patternInfo.SupportsTextPattern);
-                        candidates.Add(new AutomationCandidate(
-                            element,
-                            candidate with { SemanticScore = CodexComposerCandidateSelector.Score(candidate) }));
+                        var scoredCandidate = candidate with
+                        {
+                            SemanticScore = CodexComposerCandidateSelector.Score(candidate)
+                        };
+                        candidates.Add(new AutomationCandidate(element, scoredCandidate));
+                        if (CodexComposerCandidateSelector.IsHighConfidence(scoredCandidate))
+                        {
+                            return candidates;
+                        }
                     }
                 }
 
@@ -642,6 +674,34 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         catch (InvalidOperationException)
         {
             return false;
+        }
+    }
+
+    private static CodexComposerContentState ReadExistingContent(AutomationElement target)
+    {
+        try
+        {
+            if (!target.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
+            {
+                return CodexComposerContentState.Unknown;
+            }
+
+            var value = ((ValuePattern)pattern).Current.Value;
+            return string.IsNullOrEmpty(value)
+                ? CodexComposerContentState.Empty
+                : CodexComposerContentState.HasContent;
+        }
+        catch (ElementNotAvailableException)
+        {
+            return CodexComposerContentState.Unknown;
+        }
+        catch (COMException)
+        {
+            return CodexComposerContentState.Unknown;
+        }
+        catch (InvalidOperationException)
+        {
+            return CodexComposerContentState.Unknown;
         }
     }
 

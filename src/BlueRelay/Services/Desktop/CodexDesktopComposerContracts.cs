@@ -63,7 +63,25 @@ public interface ICodexDesktopComposerInjector
 {
     Task<OpenAiDesktopInspection> InspectOpenAiDesktopWindowsAsync(CancellationToken cancellationToken = default);
 
-    Task<CodexComposerInjectionResult> InjectAsync(string text, CancellationToken cancellationToken = default);
+    Task<CodexComposerInjectionResult> InjectAsync(
+        string text,
+        CancellationToken cancellationToken = default,
+        bool allowReplacingExistingText = false);
+}
+
+public enum CodexComposerContentState
+{
+    Empty,
+    HasContent,
+    Unknown
+}
+
+public static class CodexComposerContentGuard
+{
+    public static bool RequiresConfirmation(
+        CodexComposerContentState state,
+        bool allowReplacingExistingText) =>
+        !allowReplacingExistingText && state is not CodexComposerContentState.Empty;
 }
 
 public static class CodexComposerDiagnostics
@@ -95,6 +113,14 @@ public static class CodexComposerCandidateSelector
         "message",
         "input",
         "editor"
+    ];
+
+    private static readonly string[] StrongChromiumComposerTokens =
+    [
+        "ProseMirror",
+        "RichTextInput",
+        "ComposerLayout",
+        "thread-scroll-container"
     ];
 
     private static readonly string[] SemanticTokens =
@@ -182,6 +208,19 @@ public static class CodexComposerCandidateSelector
         return score;
     }
 
+    public static bool IsHighConfidence(CodexComposerCandidate candidate)
+    {
+        if (!IsEligible(candidate))
+        {
+            return false;
+        }
+
+        var metadata = candidate.Metadata;
+        return metadata.ControlType.Equals("Edit", StringComparison.OrdinalIgnoreCase) &&
+               metadata.FrameworkId.Equals("Chrome", StringComparison.OrdinalIgnoreCase) &&
+               ContainsToken(metadata.ClassName, ["ProseMirror"]);
+    }
+
     private static bool IsEligible(CodexComposerCandidate candidate)
     {
         var metadata = candidate.Metadata;
@@ -191,12 +230,12 @@ public static class CodexComposerCandidateSelector
                                 metadata.ControlType.Equals("Group", StringComparison.OrdinalIgnoreCase) ||
                                 metadata.ControlType.Equals("Pane", StringComparison.OrdinalIgnoreCase);
         var hasEditablePattern = candidate.SupportsValuePattern || candidate.SupportsTextPattern;
-        var hasComposerSignal = ContainsToken(
+        var hasStrongComposerSignal = ContainsToken(
             metadata.ClassName,
             metadata.AutomationId,
             metadata.Name,
             metadata.ParentHierarchy,
-            ParentComposerTokens);
+            StrongChromiumComposerTokens);
         var isChromiumCandidate = IsChromiumFramework(metadata.FrameworkId);
         return candidate.IsOpenAiWindow &&
                metadata.Handle != IntPtr.Zero &&
@@ -206,7 +245,7 @@ public static class CodexComposerCandidateSelector
                !metadata.IsOffscreen &&
                !metadata.Bounds.IsEmpty &&
                hasEditablePattern &&
-               (!isChromiumCandidate || hasComposerSignal) &&
+               (!isChromiumCandidate || hasStrongComposerSignal) &&
                !ContainsToken(string.Empty, metadata.AutomationId, metadata.Name, metadata.ParentHierarchy, NonComposerTokens);
     }
 
