@@ -155,9 +155,24 @@ public static class CodexComposerWriteVerifier
 
     public static bool HasReferencedPastedTextSignal(params string?[] values)
     {
-        return values.Any(value => value?.Contains(
-            "referenced pasted text file",
-            StringComparison.OrdinalIgnoreCase) == true);
+        return values.Any(value =>
+            value?.Contains("referenced pasted text", StringComparison.OrdinalIgnoreCase) == true ||
+            value?.Contains("pasted text file", StringComparison.OrdinalIgnoreCase) == true);
+    }
+}
+
+public sealed record CodexComposerReferenceSnapshot(
+    bool IsAvailable,
+    IReadOnlySet<string> ReferenceNodeIds)
+{
+    public int Count => ReferenceNodeIds.Count;
+
+    public bool HasNewReferencesSince(CodexComposerReferenceSnapshot before)
+    {
+        ArgumentNullException.ThrowIfNull(before);
+        return IsAvailable &&
+               before.IsAvailable &&
+               ReferenceNodeIds.Any(referenceId => !before.ReferenceNodeIds.Contains(referenceId));
     }
 }
 
@@ -405,6 +420,13 @@ public static class CodexComposerCandidateSelector
         return metadata.ControlType.Equals("Edit", StringComparison.OrdinalIgnoreCase) &&
                metadata.FrameworkId.Equals("Chrome", StringComparison.OrdinalIgnoreCase) &&
                HasClassToken(metadata.ClassName, "ProseMirror");
+    }
+
+    public static bool RequiresClipboardPaste(CodexComposerCandidate candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        return candidate.Metadata.FrameworkId.Equals("Chrome", StringComparison.OrdinalIgnoreCase) &&
+               HasClassToken(candidate.Metadata.ClassName, "ProseMirror");
     }
 
     public static bool HasClassToken(string className, string token)

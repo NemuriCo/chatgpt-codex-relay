@@ -125,6 +125,30 @@ public sealed class CodexDesktopComposerTests
     }
 
     [TestMethod]
+    public void ChromeProseMirrorComposerAlwaysUsesClipboardPasteStrategy()
+    {
+        var proseMirror = Candidate(
+            100,
+            "Edit",
+            "message-composer",
+            "随心输入",
+            supportsValuePattern: true,
+            className: "ProseMirror ProseMirror-focused",
+            frameworkId: "Chrome");
+        var genericEditor = proseMirror with
+        {
+            Metadata = proseMirror.Metadata with
+            {
+                ClassName = "RichTextInput",
+                FrameworkId = "Win32"
+            }
+        };
+
+        Assert.IsTrue(CodexComposerCandidateSelector.RequiresClipboardPaste(proseMirror));
+        Assert.IsFalse(CodexComposerCandidateSelector.RequiresClipboardPaste(genericEditor));
+    }
+
+    [TestMethod]
     public void ProseMirrorClassTokenSurvivesFocusAndBuildHashChanges()
     {
         var candidate = Candidate(
@@ -710,8 +734,40 @@ public sealed class CodexDesktopComposerTests
     {
         Assert.IsTrue(CodexComposerWriteVerifier.HasReferencedPastedTextSignal(
             "Referenced pasted text files:\n- pasted text file"));
+        Assert.IsTrue(CodexComposerWriteVerifier.HasReferencedPastedTextSignal(
+            "pasted text file: C:\\Users\\SleepyCobalt\\..."));
         Assert.IsFalse(CodexComposerWriteVerifier.HasReferencedPastedTextSignal(
             "ordinary composer text"));
+    }
+
+    [TestMethod]
+    public void ReferenceSnapshotOnlyAcceptsNewReferenceNodes()
+    {
+        var before = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(["runtime:old"], StringComparer.Ordinal));
+        var after = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(["runtime:old", "runtime:new"], StringComparer.Ordinal));
+        var unchanged = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(["runtime:old"], StringComparer.Ordinal));
+
+        Assert.IsTrue(after.HasNewReferencesSince(before));
+        Assert.IsFalse(unchanged.HasNewReferencesSince(before));
+    }
+
+    [TestMethod]
+    public void ReferenceSnapshotCannotAcceptWhenBeforeSnapshotWasUnavailable()
+    {
+        var unavailable = new CodexComposerReferenceSnapshot(
+            false,
+            new HashSet<string>(StringComparer.Ordinal));
+        var after = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(["runtime:new"], StringComparer.Ordinal));
+
+        Assert.IsFalse(after.HasNewReferencesSince(unavailable));
     }
 
     [TestMethod]
