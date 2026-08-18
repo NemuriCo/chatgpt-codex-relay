@@ -491,11 +491,19 @@ public sealed class BrowserBridgeService
                 return Failure<RelayTask>("conversation_mismatch", "The current ChatGPT conversation is not the one bound to this Workstream.");
             }
 
-            var cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstream.Id);
             var previousTask = FindCurrentTask(workstream);
+            if (previousTask is not null && BrowserTaskParser.AreEquivalentPayloads(previousTask.Prompt, prompt))
+            {
+                return new BridgeOperationResult<RelayTask>(true, previousTask);
+            }
+
+            var cancelledHandoffs = CancelHandoffCommandsForWorkstream(workstream.Id);
             var previousTaskDeliveryStatus = previousTask?.DeliveryStatus;
             var previousTaskDeliveryErrorCode = previousTask?.DeliveryErrorCode;
             var previousTaskUpdatedAt = previousTask?.UpdatedAt;
+            var previousCodexProgress = workstream.CodexProgress;
+            var previousCodexError = workstream.CodexError;
+            var previousCodexErrorCode = workstream.CodexErrorCode;
 
             var task = new RelayTask
             {
@@ -517,16 +525,22 @@ public sealed class BrowserBridgeService
             var previousTaskId = workstream.CurrentTaskId;
             _state.BrowserBridge.Tasks.Add(task);
             workstream.CurrentTaskId = task.Id.ToString("D");
+            workstream.CodexProgress = null;
+            workstream.CodexError = null;
+            workstream.CodexErrorCode = null;
 
             var stateResult = await _projectService.TryChangeStateAsync(
                 workstream.ProjectId,
                 workstream.Id,
                 WorkflowState.ReadyForCodex,
-                manualOverride: false,
+                manualOverride: true,
                 cancellationToken).ConfigureAwait(false);
             if (!stateResult.Success)
             {
                 workstream.CurrentTaskId = previousTaskId;
+                workstream.CodexProgress = previousCodexProgress;
+                workstream.CodexError = previousCodexError;
+                workstream.CodexErrorCode = previousCodexErrorCode;
                 _state.BrowserBridge.Tasks.Remove(task);
                 if (previousTask is not null)
                 {

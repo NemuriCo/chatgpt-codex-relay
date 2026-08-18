@@ -91,6 +91,114 @@ public sealed class BrowserBridgeTests
     }
 
     [TestMethod]
+    public async Task IdenticalCaptureIsDedupedWithoutChangingPreparedOrLaterState()
+    {
+        var (bridge, projectService) = CreateBridge();
+        var project = (await projectService.TryCreateAsync("Capture dedupe", CreateDirectory("capture-dedupe"))).Project!;
+        var workstream = project.Workstreams[0];
+        Assert.IsTrue((await bridge.PairAsync(bridge.GeneratePairingCode().Code!, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
+
+        var first = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\r\nA\r\n", "https://chatgpt.com/c/tab-a", "tab-a", "tab-a"));
+        Assert.IsTrue(first.Success, first.Error);
+        var firstTask = first.Value!;
+        var firstCapturedAt = firstTask.CapturedAt;
+        var changedCount = 0;
+        bridge.Changed += (_, _) => changedCount++;
+
+        workstream.CurrentState = WorkflowState.ChatGPTReviewing;
+        workstream.CodexProgress = "old transient status";
+        var duplicate = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "  # CODEX_TASK\nA  ", "https://chatgpt.com/c/tab-a", "tab-a", "tab-a"));
+
+        Assert.IsTrue(duplicate.Success, duplicate.Error);
+        Assert.AreSame(firstTask, duplicate.Value);
+        Assert.AreEqual(firstTask.Id, workstream.CurrentTaskId is { } currentId ? Guid.Parse(currentId) : Guid.Empty);
+        Assert.AreEqual(firstCapturedAt, duplicate.Value!.CapturedAt);
+        Assert.AreEqual(WorkflowState.ChatGPTReviewing, workstream.CurrentState);
+        Assert.AreEqual("old transient status", workstream.CodexProgress);
+        Assert.AreEqual(0, changedCount);
+    }
+
+    [TestMethod]
+    public async Task DifferentCaptureReplacesCurrentTaskResetsTransientStateAndPreservesBinding()
+    {
+        var state = new ApplicationState();
+        var projectService = new ProjectService(state, new MemoryStateStore(), new WorkflowStateMachine());
+        var codex = new FakeCodexBridge(new CodexTurnResult(true, "unused", null, "unused"));
+        var bridge = new BrowserBridgeService(state, projectService, codex);
+        var project = (await projectService.TryCreateAsync("Capture replacement", CreateDirectory("capture-replacement"))).Project!;
+        var workstream = project.Workstreams[0];
+        Assert.IsTrue((await bridge.PairAsync(bridge.GeneratePairingCode().Code!, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
+
+        var first = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nA", "https://chatgpt.com/c/tab-a", "tab-a", "tab-a"));
+        Assert.IsTrue(first.Success, first.Error);
+        first.Value!.UserNote = "old note";
+        first.Value.Result = "old result";
+        workstream.CodexProgress = "old progress";
+        workstream.CodexError = "old error";
+        workstream.CodexErrorCode = "old_error";
+        var bindingBefore = bridge.FindBindingDto(workstream.Id)!;
+
+        var second = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nB", "https://chatgpt.com/c/tab-a", "tab-a", "tab-a"));
+
+        Assert.IsTrue(second.Success, second.Error);
+        Assert.AreNotEqual(first.Value.Id, second.Value!.Id);
+        Assert.AreSame(second.Value, bridge.FindCurrentTask(workstream.Id));
+        Assert.AreEqual("# CODEX_TASK\nB", second.Value.Prompt);
+        Assert.IsNull(second.Value.UserNote);
+        Assert.IsNull(second.Value.Result);
+        Assert.IsNull(second.Value.ResultPayload);
+        Assert.AreEqual(WorkflowState.ReadyForCodex, workstream.CurrentState);
+        Assert.AreEqual(second.Value.Id.ToString("D"), workstream.CurrentTaskId);
+        Assert.IsNull(workstream.CodexProgress);
+        Assert.IsNull(workstream.CodexError);
+        Assert.IsNull(workstream.CodexErrorCode);
+        Assert.AreEqual("old result", first.Value.Result);
+        Assert.AreEqual(bindingBefore, bridge.FindBindingDto(workstream.Id));
+        Assert.AreEqual(0, codex.SubmitCount);
+
+        var repeated = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nB", "https://chatgpt.com/c/tab-a", "tab-a", "tab-a"));
+        Assert.IsTrue(repeated.Success, repeated.Error);
+        Assert.AreSame(second.Value, repeated.Value);
+        Assert.AreEqual(2, state.BrowserBridge.Tasks.Count);
+    }
+
+    [TestMethod]
+    public async Task ReplacementPersistsTheNewPayloadAsTheCurrentTask()
+    {
+        var statePath = Path.Combine(_testDirectory, "state.json");
+        var payloadRoot = Path.Combine(_testDirectory, "relay");
+        var state = new ApplicationState();
+        var stateStore = new JsonStateStore(statePath);
+        var projectService = new ProjectService(state, stateStore, new WorkflowStateMachine());
+        var payloadStore = new RelayPayloadStore(payloadRoot);
+        var bridge = new BrowserBridgeService(state, projectService, payloadStore: payloadStore);
+        var project = (await projectService.TryCreateAsync("Payload replacement", CreateDirectory("payload-replacement"))).Project!;
+        var workstream = project.Workstreams[0];
+        Assert.IsTrue((await bridge.PairAsync(bridge.GeneratePairingCode().Code!, "installation-a")).Success);
+        await RegisterAndBindAsync(bridge, "tab-a", workstream.Id);
+
+        _ = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nA", "https://chatgpt.com/c/tab-a", "tab-a", "tab-a"));
+        var second = await bridge.CaptureTaskAsync(new CaptureTaskRequest(
+            "installation-a", "tab-a", "# CODEX_TASK\nB", "https://chatgpt.com/c/tab-a", "tab-a", "tab-a"));
+        Assert.IsTrue(second.Success, second.Error);
+
+        var reloaded = await stateStore.LoadAsync();
+        var reloadedWorkstream = reloaded.State.Projects.Single().Workstreams.Single();
+        var reloadedTask = reloaded.State.BrowserBridge.Tasks.Single(task => task.Id == second.Value!.Id);
+        Assert.AreEqual(second.Value!.Id.ToString("D"), reloadedWorkstream.CurrentTaskId);
+        Assert.AreEqual("# CODEX_TASK\nB", payloadStore.Read(reloadedTask.Payload));
+        Assert.IsNull(reloadedTask.Result);
+    }
+
+    [TestMethod]
     public async Task StaleTabCanBeReplacedByAnotherTabForTheSameConversation()
     {
         var state = new ApplicationState();
@@ -494,6 +602,8 @@ public sealed class BrowserBridgeTests
 
         public CodexDiagnosticSnapshot Diagnostics => new(null, Version, null, null, "test", null, []);
 
+        public int SubmitCount { get; private set; }
+
         public event EventHandler<CodexProgressUpdate>? ProgressChanged;
 
         public event EventHandler<CodexApprovalRequest>? ApprovalRequested;
@@ -504,8 +614,11 @@ public sealed class BrowserBridgeTests
 
         public event EventHandler? DiagnosticsChanged;
 
-        public Task<CodexTurnResult> SubmitTaskAsync(CodexTaskRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_result);
+        public Task<CodexTurnResult> SubmitTaskAsync(CodexTaskRequest request, CancellationToken cancellationToken = default)
+        {
+            SubmitCount++;
+            return Task.FromResult(_result);
+        }
 
         public Task<bool> InterruptAsync(string threadId, string turnId, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);

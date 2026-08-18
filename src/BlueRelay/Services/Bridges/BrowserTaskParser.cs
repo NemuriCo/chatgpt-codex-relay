@@ -21,4 +21,12 @@ public static class BrowserTaskParser
             .Replace('\r', '\n')
             .Trim();
     }
+
+    public static bool AreEquivalentPayloads(string? first, string? second)
+    {
+        return string.Equals(
+            NormalizeTaskText(first),
+            NormalizeTaskText(second),
+            StringComparison.Ordinal);
+    }
 }
