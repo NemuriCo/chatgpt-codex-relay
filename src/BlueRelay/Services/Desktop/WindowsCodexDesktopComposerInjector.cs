@@ -12,9 +12,12 @@ namespace BlueRelay.Services.Desktop;
 public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerInjector
 {
     private const int MaxShortlistedWindows = 8;
-    private const int MaxComposerNodes = 512;
-    private const int MaxComposerDepth = 12;
-    private const int MaxSiblingNodes = 128;
+    private const int MaxComposerDepth = 48;
+    private const int MaxSiblingNodes = 256;
+    private static readonly ComposerTraversalLimits ControlViewLimits =
+        new(MaxNodes: 3000, MaxDepth: MaxComposerDepth, MaxSiblings: MaxSiblingNodes);
+    private static readonly ComposerTraversalLimits RawViewLimits =
+        new(MaxNodes: 3000, MaxDepth: MaxComposerDepth, MaxSiblings: MaxSiblingNodes);
     private static readonly TimeSpan WindowDiscoveryBudget = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ComposerProbeBudget = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan InspectionTimeout = TimeSpan.FromSeconds(5);
@@ -126,15 +129,18 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 candidates.Select(candidate => candidate.Metadata).ToList(),
                 out var selected) || selected is null)
         {
+            StartupDiagnostics.Write("Codex composer result=composer_not_found");
             return CodexComposerInjectionResult.Failed(
                 "codex_composer_not_found",
                 "No unambiguous editable Codex composer was found.");
         }
 
-        CodexComposerDiagnostics.WriteStage("window_candidate_pid_match", stopwatch);
+        var selectedWindow = windows.FirstOrDefault(window => window.Handle == selected.Metadata.Handle);
+        CodexComposerDiagnostics.WriteStage("window_ownership_confirmed", stopwatch);
         StartupDiagnostics.Write(
-            $"Codex composer window candidate matched pid={selected.Metadata.ProcessId} " +
-            $"hwnd={selected.Metadata.Handle.ToInt64()}");
+            $"Codex composer ownership hwnd={selected.Metadata.Handle.ToInt64()} " +
+            $"owner_pid={selectedWindow?.ProcessId.ToString() ?? "unknown"} " +
+            $"renderer_pid={selected.Metadata.ProcessId}");
         CodexComposerDiagnostics.WriteStage("window_selected", stopwatch);
         StartupDiagnostics.Write(
             $"Codex composer candidate controlType={selected.Metadata.ControlType} " +
@@ -144,6 +150,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             $"textPattern={selected.SupportsTextPattern}");
         CodexComposerDiagnostics.WriteStage("composer_candidate", stopwatch);
         CodexComposerDiagnostics.WriteStage("composer_selected", stopwatch);
+        StartupDiagnostics.Write("Codex composer result=composer_selected");
         var target = candidates.First(candidate => ReferenceEquals(candidate.Metadata, selected.Metadata)).Element;
         var focusReady = false;
         CodexComposerDiagnostics.WriteStage("focus_started", stopwatch);
@@ -275,12 +282,12 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 }
 
                 metadataWindows.Add(metadata);
-                candidates.AddRange(ProbeComposerControls(
+                var search = SearchComposerWindow(
                     window,
                     metadata,
                     cancellationToken,
-                    stopwatch,
-                    MaxComposerNodes * 2));
+                    stopwatch);
+                candidates.AddRange(search.Candidates);
             }
         }
         finally
@@ -376,6 +383,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
     {
         var candidates = new List<AutomationCandidate>();
         var probeStopwatch = Stopwatch.StartNew();
+        StartupDiagnostics.Write($"Codex composer window_count={windows.Count}");
         foreach (var windowCandidate in windows)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -389,104 +397,272 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 continue;
             }
 
-            candidates.AddRange(ProbeComposerControls(
+            StartupDiagnostics.Write(
+                $"Codex composer selected_window hwnd={windowCandidate.Handle.ToInt64()} " +
+                $"pid={windowCandidate.ProcessId} " +
+                $"title={SanitizeDiagnosticValue(windowCandidate.WindowTitle)} " +
+                $"class={SanitizeDiagnosticValue(windowCandidate.ClassName)} " +
+                $"process={SanitizeDiagnosticValue(windowCandidate.ProcessName)}");
+            var search = SearchComposerWindow(
                 window,
                 metadata,
                 cancellationToken,
-                probeStopwatch,
-                MaxComposerNodes));
+                probeStopwatch);
+            candidates.AddRange(search.Candidates);
         }
 
         return candidates;
     }
 
-    private static IReadOnlyList<AutomationCandidate> ProbeComposerControls(
+    private static ComposerWindowSearchResult SearchComposerWindow(
         AutomationElement window,
         UiAutomationMetadata windowMetadata,
         CancellationToken cancellationToken,
-        Stopwatch budgetStopwatch,
-        int maxNodes)
+        Stopwatch budgetStopwatch)
     {
-        var candidates = new List<AutomationCandidate>();
-        var walker = TreeWalker.RawViewWalker;
-        var pending = new Stack<(AutomationElement Element, int Depth)>();
-        var visitedNodes = 0;
+        var controlView = ProbeComposerPhase(
+            window,
+            windowMetadata,
+            TreeWalker.ControlViewWalker,
+            ControlViewLimits,
+            allowNonEditFallback: false,
+            cancellationToken,
+            budgetStopwatch);
+        WriteTraversalDiagnostics("control_view", controlView);
 
+        ComposerPhaseResult? rawViewFallback = null;
+        var candidates = controlView.Candidates.ToList();
+        if (!controlView.FoundHighConfidenceCandidate &&
+            budgetStopwatch.Elapsed <= ComposerProbeBudget)
+        {
+            var rawView = ProbeComposerPhase(
+                window,
+                windowMetadata,
+                TreeWalker.RawViewWalker,
+                RawViewLimits,
+                allowNonEditFallback: true,
+                cancellationToken,
+                budgetStopwatch);
+            rawViewFallback = rawView;
+            WriteTraversalDiagnostics("raw_view_fallback", rawView);
+            candidates.AddRange(rawView.Candidates);
+        }
+
+        return new ComposerWindowSearchResult(
+            DeduplicateCandidates(candidates),
+            controlView,
+            rawViewFallback);
+    }
+
+    private static ComposerPhaseResult ProbeComposerPhase(
+        AutomationElement window,
+        UiAutomationMetadata windowMetadata,
+        TreeWalker walker,
+        ComposerTraversalLimits limits,
+        bool allowNonEditFallback,
+        CancellationToken cancellationToken,
+        Stopwatch budgetStopwatch)
+    {
+        var phaseStopwatch = Stopwatch.StartNew();
         try
         {
-            var firstChild = walker.GetFirstChild(window);
-            if (firstChild is not null)
-            {
-                pending.Push((firstChild, 1));
-            }
-
-            while (pending.Count > 0 &&
-                   visitedNodes++ < maxNodes &&
-                   budgetStopwatch.Elapsed <= ComposerProbeBudget)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var (element, depth) = pending.Pop();
-                if (IsEditableControl(element))
-                {
-                    if (TryReadMetadata(
-                            element,
-                            window,
-                            windowMetadata.Handle,
-                            NativeMethods.GetForegroundWindow(),
-                            out var metadata))
-                    {
-                        metadata = metadata with { IsLikelyOpenAiWindow = true };
-                        var patternInfo = ReadEditablePatterns(element);
-                        var candidate = new CodexComposerCandidate(
-                            metadata,
-                            true,
-                            patternInfo.SupportsValuePattern,
-                            patternInfo.IsValueReadOnly,
-                            0,
-                            patternInfo.SupportsTextPattern);
-                        var scoredCandidate = candidate with
-                        {
-                            SemanticScore = CodexComposerCandidateSelector.Score(candidate)
-                        };
-                        candidates.Add(new AutomationCandidate(element, scoredCandidate));
-                        if (CodexComposerCandidateSelector.IsHighConfidence(scoredCandidate))
-                        {
-                            return candidates;
-                        }
-                    }
-                }
-
-                if (depth >= MaxComposerDepth)
-                {
-                    continue;
-                }
-
-                var children = new List<AutomationElement>();
-                var child = walker.GetFirstChild(element);
-                var siblings = 0;
-                while (child is not null && siblings++ < MaxSiblingNodes)
-                {
-                    children.Add(child);
-                    child = walker.GetNextSibling(child);
-                }
-
-                for (var index = children.Count - 1; index >= 0; index--)
-                {
-                    pending.Push((children[index], depth + 1));
-                }
-            }
+            var roots = GetChildren(window, walker);
+            var result = BoundedComposerTreeTraversal.Search<AutomationElement, AutomationCandidate>(
+                roots,
+                limits,
+                budgetStopwatch,
+                ComposerProbeBudget,
+                element => GetChildren(element, walker),
+                IsEditControl,
+                allowNonEditFallback ? IsFallbackControl : static _ => false,
+                HasProseMirrorClass,
+                element => TryCreateAutomationCandidate(
+                    element,
+                    window,
+                    windowMetadata.Handle,
+                    NativeMethods.GetForegroundWindow()),
+                candidate => CodexComposerCandidateSelector.IsHighConfidence(candidate.Metadata),
+                cancellationToken);
+            return new ComposerPhaseResult(
+                result.Candidates,
+                result.Statistics,
+                result.FoundHighConfidenceCandidate,
+                phaseStopwatch.ElapsedMilliseconds);
         }
         catch (ElementNotAvailableException)
         {
+            return ComposerPhaseResult.Empty(phaseStopwatch.ElapsedMilliseconds);
         }
         catch (COMException)
         {
+            return ComposerPhaseResult.Empty(phaseStopwatch.ElapsedMilliseconds);
         }
         catch (InvalidOperationException)
         {
+            return ComposerPhaseResult.Empty(phaseStopwatch.ElapsedMilliseconds);
+        }
+    }
+
+    private static IReadOnlyList<AutomationElement> GetChildren(
+        AutomationElement element,
+        TreeWalker walker)
+    {
+        var children = new List<AutomationElement>();
+        AutomationElement? child;
+        try
+        {
+            child = walker.GetFirstChild(element);
+        }
+        catch (ElementNotAvailableException)
+        {
+            return children;
+        }
+        catch (COMException)
+        {
+            return children;
+        }
+        catch (InvalidOperationException)
+        {
+            return children;
         }
 
-        return candidates;
+        while (child is not null && children.Count < MaxSiblingNodes)
+        {
+            children.Add(child);
+            try
+            {
+                child = walker.GetNextSibling(child);
+            }
+            catch (ElementNotAvailableException)
+            {
+                break;
+            }
+            catch (COMException)
+            {
+                break;
+            }
+            catch (InvalidOperationException)
+            {
+                break;
+            }
+        }
+
+        return children;
+    }
+
+    private static IReadOnlyList<AutomationCandidate> DeduplicateCandidates(
+        IEnumerable<AutomationCandidate> candidates)
+    {
+        return candidates
+            .GroupBy(candidate => (
+                candidate.Metadata.Metadata.Handle,
+                candidate.Metadata.Metadata.ControlType,
+                candidate.Metadata.Metadata.AutomationId,
+                candidate.Metadata.Metadata.ClassName),
+                EqualityComparer<(IntPtr, string, string, string)>.Default)
+            .Select(group => group
+                .OrderByDescending(candidate => candidate.Metadata.SemanticScore)
+                .First())
+            .ToList();
+    }
+
+    private static AutomationCandidate? TryCreateAutomationCandidate(
+        AutomationElement element,
+        AutomationElement window,
+        IntPtr fallbackWindowHandle,
+        IntPtr foregroundHandle)
+    {
+        if (!TryReadMetadata(
+                element,
+                window,
+                fallbackWindowHandle,
+                foregroundHandle,
+                out var metadata))
+        {
+            return null;
+        }
+
+        metadata = metadata with { IsLikelyOpenAiWindow = true };
+        var patternInfo = ReadEditablePatterns(element);
+        if (!patternInfo.SupportsValuePattern && !patternInfo.SupportsTextPattern)
+        {
+            return null;
+        }
+
+        var candidate = new CodexComposerCandidate(
+            metadata,
+            true,
+            patternInfo.SupportsValuePattern,
+            patternInfo.IsValueReadOnly,
+            0,
+            patternInfo.SupportsTextPattern);
+        return new AutomationCandidate(
+            element,
+            candidate with { SemanticScore = CodexComposerCandidateSelector.Score(candidate) });
+    }
+
+    private static bool IsEditControl(AutomationElement element)
+    {
+        return HasControlType(element, ControlType.Edit);
+    }
+
+    private static bool IsFallbackControl(AutomationElement element)
+    {
+        return HasControlType(element, ControlType.Document) ||
+               HasControlType(element, ControlType.Custom);
+    }
+
+    private static bool HasControlType(AutomationElement element, ControlType controlType)
+    {
+        try
+        {
+            return element.Current.ControlType == controlType;
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasProseMirrorClass(AutomationElement element)
+    {
+        try
+        {
+            return CodexComposerCandidateSelector.HasClassToken(
+                element.Current.ClassName ?? string.Empty,
+                "ProseMirror");
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static void WriteTraversalDiagnostics(string phase, ComposerPhaseResult result)
+    {
+        var statistics = result.Statistics;
+        StartupDiagnostics.Write(
+            $"Codex composer {phase} visited_nodes={statistics.VisitedNodes} " +
+            $"max_depth_reached={statistics.MaxDepthReached} " +
+            $"edit_controls_seen={statistics.EditControlsSeen} " +
+            $"prosemirror_seen={statistics.ProseMirrorSeen} " +
+            $"elapsed_ms={result.ElapsedMilliseconds}");
     }
 
     private static bool TryGetWindowElement(
@@ -572,31 +748,6 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 false,
                 handle != IntPtr.Zero && handle == foregroundHandle);
             return true;
-        }
-        catch (ElementNotAvailableException)
-        {
-            return false;
-        }
-        catch (COMException)
-        {
-            return false;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-    }
-
-    private static bool IsEditableControl(AutomationElement element)
-    {
-        try
-        {
-            var controlType = element.Current.ControlType;
-            return controlType == ControlType.Edit ||
-                   controlType == ControlType.Document ||
-                   controlType == ControlType.Custom ||
-                   controlType == ControlType.Group ||
-                   controlType == ControlType.Pane;
         }
         catch (ElementNotAvailableException)
         {
@@ -841,6 +992,11 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             return "Document";
         }
 
+        if (controlType == ControlType.Custom)
+        {
+            return "Custom";
+        }
+
         if (controlType == ControlType.Pane)
         {
             return "Pane";
@@ -914,6 +1070,13 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         }
     }
 
+    private static string SanitizeDiagnosticValue(string value)
+    {
+        return value
+            .Replace('\r', ' ')
+            .Replace('\n', ' ');
+    }
+
     private static async Task ObserveWorkerAsync(Task workerTask, string operationName)
     {
         try
@@ -963,6 +1126,25 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
     private sealed record InspectionCapture(
         OpenAiDesktopInspection Inspection,
         IReadOnlyList<AutomationCandidate> Candidates);
+
+    private sealed record ComposerPhaseResult(
+        IReadOnlyList<AutomationCandidate> Candidates,
+        ComposerTraversalStatistics Statistics,
+        bool FoundHighConfidenceCandidate,
+        long ElapsedMilliseconds)
+    {
+        public static ComposerPhaseResult Empty(long elapsedMilliseconds) =>
+            new(
+                [],
+                new ComposerTraversalStatistics(0, 0, 0, 0, false, false, false),
+                false,
+                elapsedMilliseconds);
+    }
+
+    private sealed record ComposerWindowSearchResult(
+        IReadOnlyList<AutomationCandidate> Candidates,
+        ComposerPhaseResult ControlView,
+        ComposerPhaseResult? RawViewFallback);
 
     private sealed record NativeWindowCandidate(
         IntPtr Handle,

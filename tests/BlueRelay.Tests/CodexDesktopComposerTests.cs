@@ -139,6 +139,23 @@ public sealed class CodexDesktopComposerTests
     }
 
     [TestMethod]
+    public void ProseMirrorMustBeAWhitespaceSeparatedClassToken()
+    {
+        var candidate = Candidate(
+            100,
+            "Edit",
+            "message-editor",
+            "随心输入",
+            supportsValuePattern: true,
+            className: "SomeProseMirrorThing",
+            frameworkId: "Chrome",
+            parentHierarchy: "Pane#unrelated");
+
+        Assert.IsFalse(CodexComposerCandidateSelector.IsHighConfidence(candidate));
+        Assert.IsFalse(CodexComposerCandidateSelector.TrySelect([candidate], out _));
+    }
+
+    [TestMethod]
     public void CustomComposerSurfaceWithEditableParentIsRecognized()
     {
         var candidate = Candidate(
@@ -209,6 +226,137 @@ public sealed class CodexDesktopComposerTests
 
         Assert.IsFalse(CodexComposerCandidateSelector.TrySelect([offscreen], out _));
         Assert.IsFalse(CodexComposerCandidateSelector.TrySelect([disabled], out _));
+    }
+
+    [TestMethod]
+    public void BoundedTraversalFindsComposerPastLegacyDepthAndNodeBudget()
+    {
+        var root = new TraversalNode();
+        var current = root;
+        for (var depth = 0; depth < 24; depth++)
+        {
+            var child = new TraversalNode();
+            current.Children.Add(child);
+            current = child;
+        }
+
+        current.IsEdit = true;
+        current.IsProseMirror = true;
+        current.IsCandidate = true;
+
+        var result = BoundedComposerTreeTraversal.Search<TraversalNode, TraversalNode>(
+            [root],
+            new ComposerTraversalLimits(3000, 48, 256),
+            System.Diagnostics.Stopwatch.StartNew(),
+            TimeSpan.FromSeconds(2),
+            node => node.Children,
+            node => node.IsEdit,
+            _ => false,
+            node => node.IsProseMirror,
+            node => node.IsCandidate ? node : null,
+            node => node.IsCandidate);
+
+        Assert.IsTrue(result.FoundHighConfidenceCandidate);
+        Assert.AreEqual(25, result.Statistics.MaxDepthReached);
+        Assert.AreEqual(1, result.Statistics.ProseMirrorSeen);
+        Assert.AreSame(current, result.Candidates[0]);
+
+        var largeBranch = CreateFullBinaryTree(10);
+        var largeRoot = new TraversalNode();
+        largeRoot.Children.Add(largeBranch);
+        var lateCandidate = new TraversalNode
+        {
+            IsEdit = true,
+            IsProseMirror = true,
+            IsCandidate = true
+        };
+        largeRoot.Children.Add(lateCandidate);
+
+        var largeResult = BoundedComposerTreeTraversal.Search<TraversalNode, TraversalNode>(
+            [largeRoot],
+            new ComposerTraversalLimits(3000, 48, 256),
+            System.Diagnostics.Stopwatch.StartNew(),
+            TimeSpan.FromSeconds(2),
+            node => node.Children,
+            node => node.IsEdit,
+            _ => false,
+            node => node.IsProseMirror,
+            node => node.IsCandidate ? node : null,
+            node => node.IsCandidate);
+
+        Assert.IsTrue(largeResult.FoundHighConfidenceCandidate);
+        Assert.IsTrue(largeResult.Statistics.VisitedNodes > 512);
+        Assert.AreSame(lateCandidate, largeResult.Candidates[0]);
+    }
+
+    [TestMethod]
+    public void BoundedTraversalStopsWhenControlViewFindsHighConfidenceComposer()
+    {
+        var childTraversalCalls = 0;
+        var composer = new TraversalNode
+        {
+            IsEdit = true,
+            IsProseMirror = true,
+            IsCandidate = true
+        };
+        composer.Children.Add(new TraversalNode());
+
+        var result = BoundedComposerTreeTraversal.Search<TraversalNode, TraversalNode>(
+            [composer],
+            new ComposerTraversalLimits(3000, 48, 256),
+            System.Diagnostics.Stopwatch.StartNew(),
+            TimeSpan.FromSeconds(2),
+            node =>
+            {
+                childTraversalCalls++;
+                return node.Children;
+            },
+            node => node.IsEdit,
+            _ => false,
+            node => node.IsProseMirror,
+            node => node.IsCandidate ? node : null,
+            node => node.IsCandidate);
+
+        Assert.IsTrue(result.FoundHighConfidenceCandidate);
+        Assert.AreEqual(0, childTraversalCalls);
+    }
+
+    [TestMethod]
+    public void RawViewFallbackCanFindComposerWhenControlViewDoesNot()
+    {
+        var controlViewResult = BoundedComposerTreeTraversal.Search<TraversalNode, TraversalNode>(
+            [new TraversalNode()],
+            new ComposerTraversalLimits(3000, 48, 256),
+            System.Diagnostics.Stopwatch.StartNew(),
+            TimeSpan.FromSeconds(2),
+            node => node.Children,
+            node => node.IsEdit,
+            _ => false,
+            node => node.IsProseMirror,
+            node => node.IsCandidate ? node : null,
+            node => node.IsCandidate);
+
+        var rawCandidate = new TraversalNode
+        {
+            IsEdit = true,
+            IsProseMirror = true,
+            IsCandidate = true
+        };
+        var rawViewResult = BoundedComposerTreeTraversal.Search<TraversalNode, TraversalNode>(
+            [rawCandidate],
+            new ComposerTraversalLimits(3000, 48, 256),
+            System.Diagnostics.Stopwatch.StartNew(),
+            TimeSpan.FromSeconds(2),
+            node => node.Children,
+            node => node.IsEdit,
+            _ => true,
+            node => node.IsProseMirror,
+            node => node.IsCandidate ? node : null,
+            node => node.IsCandidate);
+
+        Assert.IsFalse(controlViewResult.FoundHighConfidenceCandidate);
+        Assert.IsTrue(rawViewResult.FoundHighConfidenceCandidate);
+        Assert.AreSame(rawCandidate, rawViewResult.Candidates[0]);
     }
 
     [TestMethod]
@@ -466,6 +614,30 @@ public sealed class CodexDesktopComposerTests
         return new CodexComposerOperationCoordinator(
             timeout,
             operation => Task.Run(operation));
+    }
+
+    private static TraversalNode CreateFullBinaryTree(int depth)
+    {
+        var node = new TraversalNode();
+        if (depth <= 0)
+        {
+            return node;
+        }
+
+        node.Children.Add(CreateFullBinaryTree(depth - 1));
+        node.Children.Add(CreateFullBinaryTree(depth - 1));
+        return node;
+    }
+
+    private sealed class TraversalNode
+    {
+        public List<TraversalNode> Children { get; } = [];
+
+        public bool IsEdit { get; set; }
+
+        public bool IsProseMirror { get; set; }
+
+        public bool IsCandidate { get; set; }
     }
 
     private static CodexComposerCandidate Candidate(

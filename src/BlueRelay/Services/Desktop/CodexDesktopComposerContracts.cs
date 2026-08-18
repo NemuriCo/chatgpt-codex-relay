@@ -201,7 +201,7 @@ public static class CodexComposerCandidateSelector
         score += candidate.SupportsValuePattern && !candidate.IsValueReadOnly ? 10 : 0;
         score += candidate.SupportsTextPattern ? 8 : 0;
         score += IsChromiumFramework(metadata.FrameworkId) ? 12 : 0;
-        score += ContainsToken(metadata.ClassName, ComposerClassTokens) ? 55 : 0;
+        score += HasClassTokenAny(metadata.ClassName, ComposerClassTokens) ? 55 : 0;
         score += ContainsToken(metadata.ParentHierarchy, ParentComposerTokens) ? 20 : 0;
         score += SemanticSignal(metadata.AutomationId, metadata.Name, metadata.ClassName);
         score += RelativeBottomSignal(metadata);
@@ -218,7 +218,14 @@ public static class CodexComposerCandidateSelector
         var metadata = candidate.Metadata;
         return metadata.ControlType.Equals("Edit", StringComparison.OrdinalIgnoreCase) &&
                metadata.FrameworkId.Equals("Chrome", StringComparison.OrdinalIgnoreCase) &&
-               ContainsToken(metadata.ClassName, ["ProseMirror"]);
+               HasClassToken(metadata.ClassName, "ProseMirror");
+    }
+
+    public static bool HasClassToken(string className, string token)
+    {
+        return className
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Any(value => value.Equals(token, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsEligible(CodexComposerCandidate candidate)
@@ -226,16 +233,15 @@ public static class CodexComposerCandidateSelector
         var metadata = candidate.Metadata;
         var isEditableControl = metadata.ControlType.Equals("Edit", StringComparison.OrdinalIgnoreCase) ||
                                 metadata.ControlType.Equals("Document", StringComparison.OrdinalIgnoreCase) ||
-                                metadata.ControlType.Equals("Custom", StringComparison.OrdinalIgnoreCase) ||
-                                metadata.ControlType.Equals("Group", StringComparison.OrdinalIgnoreCase) ||
-                                metadata.ControlType.Equals("Pane", StringComparison.OrdinalIgnoreCase);
+                                metadata.ControlType.Equals("Custom", StringComparison.OrdinalIgnoreCase);
         var hasEditablePattern = candidate.SupportsValuePattern || candidate.SupportsTextPattern;
-        var hasStrongComposerSignal = ContainsToken(
-            metadata.ClassName,
-            metadata.AutomationId,
-            metadata.Name,
-            metadata.ParentHierarchy,
-            StrongChromiumComposerTokens);
+        var hasStrongComposerSignal = HasClassTokenAny(metadata.ClassName, StrongChromiumComposerTokens) ||
+                                      ContainsToken(
+                                          string.Empty,
+                                          metadata.AutomationId,
+                                          metadata.Name,
+                                          metadata.ParentHierarchy,
+                                          StrongChromiumComposerTokens);
         var isChromiumCandidate = IsChromiumFramework(metadata.FrameworkId);
         return candidate.IsOpenAiWindow &&
                metadata.Handle != IntPtr.Zero &&
@@ -283,6 +289,9 @@ public static class CodexComposerCandidateSelector
 
     private static bool ContainsToken(string value, IEnumerable<string> tokens) =>
         tokens.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasClassTokenAny(string className, IEnumerable<string> tokens) =>
+        tokens.Any(token => HasClassToken(className, token));
 
     private static bool ContainsToken(
         string className,
