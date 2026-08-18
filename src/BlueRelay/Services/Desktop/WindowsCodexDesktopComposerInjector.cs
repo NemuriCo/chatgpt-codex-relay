@@ -905,8 +905,11 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             candidate.Metadata.Name);
         var normalizedValue = CodexComposerContentGuard.NormalizeComposerTextForEmptiness(value);
         var normalizedName = CodexComposerContentGuard.NormalizeComposerTextForEmptiness(candidate.Metadata.Name);
+        var normalizedText = CodexComposerContentGuard.NormalizeComposerTextForEmptiness(text);
         var valueEqualsName = valuePatternAvailable &&
                               normalizedValue.Equals(normalizedName, StringComparison.Ordinal);
+        var textEqualsName = textPatternAvailable &&
+                             normalizedText.Equals(normalizedName, StringComparison.Ordinal);
         StartupDiagnostics.Write(
             $"Codex composer composer_content_probe " +
             $"valuePatternAvailable={valuePatternAvailable} " +
@@ -915,6 +918,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             $"textLength={text?.Length ?? 0} " +
             $"nameLength={candidate.Metadata.Name.Length} " +
             $"valueEqualsName={valueEqualsName} " +
+            $"textEqualsName={textEqualsName} " +
             $"className={SanitizeDiagnosticValue(candidate.Metadata.ClassName)} " +
             $"finalContentState={contentState}");
         return contentState;

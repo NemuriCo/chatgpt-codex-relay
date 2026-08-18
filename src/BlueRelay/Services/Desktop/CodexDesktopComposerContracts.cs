@@ -116,31 +116,53 @@ public static class CodexComposerContentGuard
         string? valuePatternValue,
         string? accessibilityName)
     {
-        if (isProseMirror && textPatternAvailable)
+        var normalizedText = NormalizeComposerTextForEmptiness(textPatternText);
+        var normalizedValue = NormalizeComposerTextForEmptiness(valuePatternValue);
+        var normalizedName = NormalizeComposerTextForEmptiness(accessibilityName);
+
+        if (isProseMirror)
         {
-            return string.IsNullOrEmpty(NormalizeComposerTextForEmptiness(textPatternText))
+            if (textPatternAvailable && valuePatternAvailable &&
+                normalizedText.Length == 0 && normalizedValue.Length == 0)
+            {
+                return CodexComposerContentState.Empty;
+            }
+
+            var valueLooksLikePlaceholder = valuePatternAvailable &&
+                                            normalizedName.Length > 0 &&
+                                            normalizedValue.Equals(normalizedName, StringComparison.Ordinal);
+            var textLooksLikePlaceholder = textPatternAvailable &&
+                                           normalizedName.Length > 0 &&
+                                           normalizedText.Equals(normalizedName, StringComparison.Ordinal);
+            if (valueLooksLikePlaceholder &&
+                (!textPatternAvailable || normalizedText.Length == 0 || textLooksLikePlaceholder))
+            {
+                return CodexComposerContentState.Empty;
+            }
+
+            if (textPatternAvailable && normalizedText.Length > 0)
+            {
+                return CodexComposerContentState.HasContent;
+            }
+
+            if (valuePatternAvailable && normalizedValue.Length > 0)
+            {
+                return CodexComposerContentState.HasContent;
+            }
+
+            return textPatternAvailable || valuePatternAvailable
+                ? CodexComposerContentState.Empty
+                : CodexComposerContentState.Unknown;
+        }
+
+        if (valuePatternAvailable)
+        {
+            return normalizedValue.Length == 0
                 ? CodexComposerContentState.Empty
                 : CodexComposerContentState.HasContent;
         }
 
-        if (!valuePatternAvailable)
-        {
-            return CodexComposerContentState.Unknown;
-        }
-
-        var value = NormalizeComposerTextForEmptiness(valuePatternValue);
-        if (value.Length == 0)
-        {
-            return CodexComposerContentState.Empty;
-        }
-
-        var name = NormalizeComposerTextForEmptiness(accessibilityName);
-        if (isProseMirror && name.Length > 0 && value.Equals(name, StringComparison.Ordinal))
-        {
-            return CodexComposerContentState.Empty;
-        }
-
-        return CodexComposerContentState.HasContent;
+        return CodexComposerContentState.Unknown;
     }
 
     public static string NormalizeComposerTextForEmptiness(string? value)

@@ -1,5 +1,7 @@
 using BlueRelay.Services.Bridges;
 using BlueRelay.Services.Desktop;
+using BlueRelay.Services.Dialogs;
+using WpfUiMessageBoxResult = Wpf.Ui.Controls.MessageBoxResult;
 
 namespace BlueRelay.Tests;
 
@@ -479,6 +481,23 @@ public sealed class CodexDesktopComposerTests
     }
 
     [TestMethod]
+    public void ProseMirrorPlaceholderWithTrailingNewlineIsEmptyForMultipleLanguages()
+    {
+        foreach (var placeholder in new[] { "随心输入", "Ask anything" })
+        {
+            var state = CodexComposerContentGuard.DetermineContentState(
+                isProseMirror: true,
+                textPatternAvailable: true,
+                textPatternText: placeholder + "\n",
+                valuePatternAvailable: true,
+                valuePatternValue: placeholder + "\n",
+                accessibilityName: placeholder);
+
+            Assert.AreEqual(CodexComposerContentState.Empty, state, placeholder);
+        }
+    }
+
+    [TestMethod]
     public void ProseMirrorRealTextIsHasContentEvenWithPlaceholderLikeName()
     {
         var state = CodexComposerContentGuard.DetermineContentState(
@@ -504,6 +523,28 @@ public sealed class CodexDesktopComposerTests
             accessibilityName: string.Empty);
 
         Assert.AreEqual(CodexComposerContentState.HasContent, state);
+    }
+
+    [TestMethod]
+    public void RealTextWinsOverPlaceholderValueConflict()
+    {
+        var state = CodexComposerContentGuard.DetermineContentState(
+            isProseMirror: true,
+            textPatternAvailable: true,
+            textPatternText: "hello",
+            valuePatternAvailable: true,
+            valuePatternValue: "Ask anything",
+            accessibilityName: "Ask anything");
+
+        Assert.AreEqual(CodexComposerContentState.HasContent, state);
+    }
+
+    [TestMethod]
+    public void ContentNormalizationRemovesProviderTrailingWhitespaceAndZeroWidthCharacters()
+    {
+        Assert.AreEqual(
+            "Ask anything",
+            CodexComposerContentGuard.NormalizeComposerTextForEmptiness("Ask anything\n\u200B"));
     }
 
     [TestMethod]
@@ -563,6 +604,28 @@ public sealed class CodexDesktopComposerTests
             accessibilityName: "随心输入");
 
         Assert.AreEqual(CodexComposerContentState.Unknown, state);
+    }
+
+    [TestMethod]
+    public void ReplaceDialogHasExactlyTwoVisibleActions()
+    {
+        var buttons = AskDialogButtonConfiguration.ReplaceOrCancel("替换", "取消");
+
+        Assert.AreEqual(2, buttons.VisibleActionButtonCount);
+        Assert.AreEqual("替换", buttons.PrimaryButtonText);
+        Assert.IsNull(buttons.SecondaryButtonText);
+        Assert.IsFalse(buttons.IsSecondaryButtonEnabled);
+        Assert.AreEqual("取消", buttons.CloseButtonText);
+        Assert.IsTrue(buttons.IsCloseButtonEnabled);
+        Assert.IsFalse(buttons.CloseButtonText.Equals("Close", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ReplaceDialogOnlyPrimaryResultIsAccepted()
+    {
+        Assert.IsTrue(AskDialogButtonConfiguration.IsAccepted(WpfUiMessageBoxResult.Primary));
+        Assert.IsFalse(AskDialogButtonConfiguration.IsAccepted(WpfUiMessageBoxResult.Secondary));
+        Assert.IsFalse(AskDialogButtonConfiguration.IsAccepted(WpfUiMessageBoxResult.None));
     }
 
     [TestMethod]

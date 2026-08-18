@@ -46,20 +46,24 @@ public sealed class MessageBoxDialogService : IDialogService
         string acceptLabel,
         CancellationToken cancellationToken = default)
     {
+        var buttons = AskDialogButtonConfiguration.ReplaceOrCancel(acceptLabel, _text.Cancel);
         var messageBox = new WpfUiMessageBox
         {
             Owner = GetOwner(),
             Title = title,
             Content = message,
-            PrimaryButtonText = acceptLabel,
+            PrimaryButtonText = buttons.PrimaryButtonText,
             PrimaryButtonAppearance = ControlAppearance.Primary,
             PrimaryButtonIcon = new SymbolIcon(SymbolRegular.Checkmark16),
-            SecondaryButtonText = _text.Cancel,
+            SecondaryButtonText = buttons.SecondaryButtonText ?? string.Empty,
+            IsSecondaryButtonEnabled = buttons.IsSecondaryButtonEnabled,
+            CloseButtonText = buttons.CloseButtonText,
+            IsCloseButtonEnabled = buttons.IsCloseButtonEnabled,
             ShowTitle = true
         };
 
         var result = await messageBox.ShowDialogAsync(cancellationToken: cancellationToken);
-        return result == WpfUiMessageBoxResult.Primary;
+        return AskDialogButtonConfiguration.IsAccepted(result);
     }
 
     public async Task ShowErrorAsync(string title, string message, CancellationToken cancellationToken = default)
