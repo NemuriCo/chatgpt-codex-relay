@@ -76,6 +76,7 @@ public sealed class MainViewModel : ObservableObject
     private string _lastSuggestedName = string.Empty;
     private string? _statusMessage;
     private bool _statusIsError;
+    private bool _statusIsWarning;
     private GitRepositoryInfo? _repositoryInfo;
     private bool _browserBridgeAvailable;
     private string? _browserBridgeStatus;
@@ -653,7 +654,11 @@ public sealed class MainViewModel : ObservableObject
 
     public bool HasErrorStatus => HasStatusMessage && StatusIsError;
 
-    public MediaBrush StatusAccentBrush => StatusIsError ? MediaBrushes.IndianRed : MediaBrushes.LightSkyBlue;
+    public MediaBrush StatusAccentBrush => StatusIsError
+        ? MediaBrushes.IndianRed
+        : StatusIsWarning
+            ? MediaBrushes.Goldenrod
+            : MediaBrushes.LightSkyBlue;
 
     public bool StatusIsError
     {
@@ -663,6 +668,18 @@ public sealed class MainViewModel : ObservableObject
             if (SetProperty(ref _statusIsError, value))
             {
                 OnPropertyChanged(nameof(HasErrorStatus));
+                OnPropertyChanged(nameof(StatusAccentBrush));
+            }
+        }
+    }
+
+    public bool StatusIsWarning
+    {
+        get => _statusIsWarning;
+        private set
+        {
+            if (SetProperty(ref _statusIsWarning, value))
+            {
                 OnPropertyChanged(nameof(StatusAccentBrush));
             }
         }
@@ -1546,13 +1563,16 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        SetStatus(result.Code == "clipboard_paste_accepted_as_reference"
-            ? result.ClipboardRestoreFailed
-                ? Ui.CodexComposerClipboardReferenceAcceptedRestoreFailed
-                : Ui.CodexComposerClipboardReferenceAccepted
-            : result.ClipboardRestoreFailed
-                ? Ui.CodexComposerFilledClipboardRestoreFailed
+        if (result.ClipboardWarning)
+        {
+            SetStatus(Ui.CodexComposerFilledClipboardWarning, isWarning: true);
+        }
+        else
+        {
+            SetStatus(result.Code == "clipboard_paste_accepted_as_reference"
+                ? Ui.CodexComposerClipboardReferenceAccepted
                 : Ui.CodexComposerFilled);
+        }
     }
 
     private string GetComposerFailureMessage(CodexComposerInjectionResult result)
@@ -1568,7 +1588,9 @@ public sealed class MainViewModel : ObservableObject
             "codex_composer_probe_timeout" => Ui.CodexComposerProbeTimeout,
             "codex_composer_busy" => Ui.CodexComposerBusy,
             "codex_composer_cancelled" => Ui.CodexComposerCancelled,
+            "codex_foreground_failed" => Ui.CodexComposerForegroundFailed,
             "codex_clipboard_unsafe" => Ui.CodexComposerClipboardUnsafe,
+            "codex_clipboard_write_failed" => Ui.CodexComposerClipboardWriteFailed,
             "codex_task_empty" => Ui.CodexComposerTaskEmpty,
             "codex_composer_verification_failed" => Ui.CodexComposerVerificationFailed,
             _ => Ui.CodexComposerInjectionFailed
@@ -1908,9 +1930,10 @@ public sealed class MainViewModel : ObservableObject
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private void SetStatus(string message, bool isError = false)
+    private void SetStatus(string message, bool isError = false, bool isWarning = false)
     {
         StatusIsError = isError;
+        StatusIsWarning = isWarning;
         StatusMessage = message;
     }
 

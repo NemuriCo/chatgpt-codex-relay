@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using BlueRelay.Services.Bridges;
 using BlueRelay.Services.Desktop;
 using BlueRelay.Services.Dialogs;
@@ -146,6 +147,145 @@ public sealed class CodexDesktopComposerTests
 
         Assert.IsTrue(CodexComposerCandidateSelector.RequiresClipboardPaste(proseMirror));
         Assert.IsFalse(CodexComposerCandidateSelector.RequiresClipboardPaste(genericEditor));
+    }
+
+    [TestMethod]
+    public void CtrlVInputSequenceUsesVirtualKeyDownAndUpOrder()
+    {
+        var sequence = CodexKeyboardInputSequence.CtrlV;
+
+        Assert.AreEqual(4, sequence.Count);
+        Assert.AreEqual(new CodexKeyboardInput(0x11, KeyUp: false), sequence[0]);
+        Assert.AreEqual(new CodexKeyboardInput(0x56, KeyUp: false), sequence[1]);
+        Assert.AreEqual(new CodexKeyboardInput(0x56, KeyUp: true), sequence[2]);
+        Assert.AreEqual(new CodexKeyboardInput(0x11, KeyUp: true), sequence[3]);
+    }
+
+    [TestMethod]
+    public void SendInputNativeLayoutMatchesWin32Abi()
+    {
+        var expectedInputSize = IntPtr.Size == 8 ? 40 : 28;
+        var expectedUnionSize = IntPtr.Size == 8 ? 32 : 24;
+        var expectedKeyboardInputSize = IntPtr.Size == 8 ? 24 : 16;
+
+        Assert.AreEqual(expectedInputSize, Marshal.SizeOf<CodexSendInputNative>());
+        Assert.AreEqual(expectedUnionSize, Marshal.SizeOf<CodexSendInputUnion>());
+        Assert.AreEqual(expectedKeyboardInputSize, Marshal.SizeOf<CodexSendInputKeyboard>());
+        Assert.AreEqual(0, Marshal.OffsetOf<CodexSendInputUnion>(nameof(CodexSendInputUnion.Keyboard)).ToInt32());
+        Assert.AreEqual(IntPtr.Size == 8 ? 8 : 4,
+            Marshal.OffsetOf<CodexSendInputNative>(nameof(CodexSendInputNative.Data)).ToInt32());
+    }
+
+    [TestMethod]
+    public void SendInputKeyboardExtraInfoIsPointerSized()
+    {
+        var field = typeof(CodexSendInputKeyboard).GetField(nameof(CodexSendInputKeyboard.ExtraInfo));
+
+        Assert.IsNotNull(field);
+        Assert.AreEqual(typeof(IntPtr), field!.FieldType);
+        Assert.AreEqual(IntPtr.Size == 8 ? 16 : 12,
+            Marshal.OffsetOf<CodexSendInputKeyboard>(nameof(CodexSendInputKeyboard.ExtraInfo)).ToInt32());
+    }
+
+    [TestMethod]
+    public void PartialSendInputCountIsFailure()
+    {
+        var result = new CodexKeyboardInputSendResult(
+            RequestedInputCount: 4,
+            SentInputCount: 3,
+            Win32Error: 5);
+
+        Assert.IsFalse(result.Succeeded);
+    }
+
+    [TestMethod]
+    public void ClipboardVerificationRequiresTextAndExactSourceLength()
+    {
+        Assert.IsTrue(CodexClipboardWriteVerifier.Verify(true, 24, 24).IsVerified);
+        Assert.IsFalse(CodexClipboardWriteVerifier.Verify(false, 24, 24).IsVerified);
+        Assert.IsFalse(CodexClipboardWriteVerifier.Verify(true, 23, 24).IsVerified);
+    }
+
+    [TestMethod]
+    public void FormalComposerPasteCanProceedWhenClipboardSnapshotIsUnavailable()
+    {
+        Assert.IsTrue(CodexComposerInputDecision.CanSendFormalCtrlV(
+            foregroundMatchesTarget: true,
+            uiaFocus: true,
+            clipboardSet: true,
+            clipboardVerified: true,
+            clipboardSnapshotAvailable: false));
+        Assert.IsTrue(CodexComposerInputDecision.CanSendFormalCtrlV(
+            foregroundMatchesTarget: true,
+            uiaFocus: true,
+            clipboardSet: true,
+            clipboardVerified: true,
+            clipboardSnapshotAvailable: true));
+    }
+
+    [TestMethod]
+    public void ClipboardTextComparerNormalizesLineEndingsButRequiresExactText()
+    {
+        Assert.IsTrue(CodexClipboardTextComparer.Matches(
+            "first\r\nsecond\r\n",
+            "first\nsecond\n"));
+        Assert.IsFalse(CodexClipboardTextComparer.Matches(
+            "first\nsecond\n",
+            "first\nsecond\nwith note"));
+    }
+
+    [TestMethod]
+    public void SuccessfulFillWithUnavailableSnapshotIsSuccessWithWarning()
+    {
+        var result = CodexComposerInjectionResult.Filled(
+            "filled",
+            usedClipboardFallback: true,
+            mode: CodexComposerInjectionMode.ClipboardInlineVerified,
+            clipboardSnapshotMode: CodexClipboardSnapshotMode.Unavailable,
+            clipboardRestoreUnavailable: true);
+
+        Assert.IsTrue(result.Success);
+        Assert.IsTrue(result.ClipboardWarning);
+        Assert.IsTrue(result.ClipboardRestoreUnavailable);
+        Assert.IsFalse(result.ClipboardRestoreFailed);
+    }
+
+    [TestMethod]
+    public void RestoreFailureDoesNotTurnVerifiedFillIntoFailure()
+    {
+        var result = CodexComposerInjectionResult.Filled(
+            "filled",
+            usedClipboardFallback: true,
+            clipboardRestoreFailed: true,
+            mode: CodexComposerInjectionMode.ClipboardInlineVerified);
+
+        Assert.IsTrue(result.Success);
+        Assert.IsTrue(result.ClipboardWarning);
+    }
+
+    [TestMethod]
+    public void ClipboardRetryPolicyIsBoundedAndNeverDelaysPastRemainingBudget()
+    {
+        Assert.AreEqual(
+            21,
+            CodexClipboardRetryPolicy.GetMaximumAttempts(
+                TimeSpan.FromMilliseconds(500),
+                TimeSpan.FromMilliseconds(25)));
+        Assert.AreEqual(
+            TimeSpan.FromMilliseconds(25),
+            CodexClipboardRetryPolicy.GetDelay(
+                TimeSpan.FromMilliseconds(100),
+                TimeSpan.FromMilliseconds(25)));
+        Assert.AreEqual(
+            TimeSpan.FromMilliseconds(10),
+            CodexClipboardRetryPolicy.GetDelay(
+                TimeSpan.FromMilliseconds(10),
+                TimeSpan.FromMilliseconds(25)));
+        Assert.AreEqual(
+            TimeSpan.Zero,
+            CodexClipboardRetryPolicy.GetDelay(
+                TimeSpan.Zero,
+                TimeSpan.FromMilliseconds(25)));
     }
 
     [TestMethod]
@@ -730,6 +870,145 @@ public sealed class CodexDesktopComposerTests
     }
 
     [TestMethod]
+    public void PlainTextRemainsInlineExactVerified()
+    {
+        const string source = "first\nmiddle\nlast";
+
+        var verification = CodexComposerWriteVerifier.Verify(
+            source,
+            valueAvailable: true,
+            value: source,
+            textAvailable: true,
+            text: source);
+
+        Assert.IsTrue(verification.IsVerified);
+        Assert.IsFalse(verification.IsRichTextTransformedAccepted);
+    }
+
+    [TestMethod]
+    public void MarkdownHeadingAcceptsRichTextTransformation()
+    {
+        var verification = CodexComposerWriteVerifier.Verify(
+            "# CODEX_TASK\n\n第一段。",
+            valueAvailable: true,
+            value: "CODEX_TASK\n第一段。",
+            textAvailable: true,
+            text: "CODEX_TASK\n第一段。");
+
+        Assert.IsFalse(verification.IsVerified);
+        Assert.IsTrue(verification.IsRichTextTransformedAccepted);
+        Assert.AreEqual(2, verification.SemanticAnchorCount);
+        Assert.AreEqual(2, verification.SemanticAnchorMatchedCount);
+        Assert.IsTrue(verification.SemanticAnchorsInOrder);
+    }
+
+    [TestMethod]
+    public void MarkdownListAcceptsRichTextTransformation()
+    {
+        var verification = CodexComposerWriteVerifier.Verify(
+            "- item A\n- item B",
+            valueAvailable: true,
+            value: "item A\nitem B",
+            textAvailable: true,
+            text: "item A\nitem B");
+
+        Assert.IsFalse(verification.IsVerified);
+        Assert.IsTrue(verification.IsRichTextTransformedAccepted);
+        Assert.IsTrue(verification.SemanticAnchorsInOrder);
+    }
+
+    [TestMethod]
+    public void MarkdownFormattingAcceptsRichTextTransformation()
+    {
+        var verification = CodexComposerWriteVerifier.Verify(
+            "**bold**\n`inline`",
+            valueAvailable: true,
+            value: "bold\ninline",
+            textAvailable: false,
+            text: null);
+
+        Assert.IsFalse(verification.IsVerified);
+        Assert.IsTrue(verification.IsRichTextTransformedAccepted);
+        Assert.AreEqual(2, verification.SemanticAnchorMatchedCount);
+    }
+
+    [TestMethod]
+    public void MissingLastSemanticAnchorRejectsTruncatedDestination()
+    {
+        var verification = CodexComposerWriteVerifier.Verify(
+            "first\nmiddle\nlast",
+            valueAvailable: true,
+            value: "first\nmiddle",
+            textAvailable: true,
+            text: "first\nmiddle");
+
+        Assert.IsFalse(verification.IsVerified);
+        Assert.IsFalse(verification.IsRichTextTransformedAccepted);
+        Assert.AreEqual(2, verification.SemanticAnchorMatchedCount);
+        Assert.IsFalse(verification.SemanticAnchorsInOrder);
+    }
+
+    [TestMethod]
+    public void LongRichTextRequiresStartAndEndAnchors()
+    {
+        var source = "# BLUERELAY_PAYLOAD_START_7F3A\n" +
+                     string.Join("\n", Enumerable.Range(0, 160).Select(index => $"- section_{index} body_{index}")) +
+                     "\n- BLUERELAY_PAYLOAD_END_91C2";
+        var destination = source
+            .Replace("# ", string.Empty, StringComparison.Ordinal)
+            .Replace("- ", string.Empty, StringComparison.Ordinal);
+
+        var verification = CodexComposerWriteVerifier.Verify(
+            source,
+            valueAvailable: true,
+            value: destination,
+            textAvailable: true,
+            text: destination);
+
+        Assert.IsFalse(verification.IsVerified);
+        Assert.IsTrue(verification.IsRichTextTransformedAccepted);
+        Assert.AreEqual(5, verification.SemanticAnchorCount);
+        Assert.AreEqual(5, verification.SemanticAnchorMatchedCount);
+    }
+
+    [TestMethod]
+    public void LongRichTextMissingEndAnchorIsRejected()
+    {
+        var source = "# BLUERELAY_PAYLOAD_START_7F3A\n" +
+                     string.Join("\n", Enumerable.Range(0, 160).Select(index => $"- section_{index} body_{index}")) +
+                     "\n- BLUERELAY_PAYLOAD_END_91C2";
+        var destination = source
+            .Replace("# ", string.Empty, StringComparison.Ordinal)
+            .Replace("- ", string.Empty, StringComparison.Ordinal)
+            .Replace("BLUERELAY_PAYLOAD_END_91C2", string.Empty, StringComparison.Ordinal);
+
+        var verification = CodexComposerWriteVerifier.Verify(
+            source,
+            valueAvailable: true,
+            value: destination,
+            textAvailable: true,
+            text: destination);
+
+        Assert.IsFalse(verification.IsRichTextTransformedAccepted);
+        Assert.AreEqual(4, verification.SemanticAnchorMatchedCount);
+    }
+
+    [TestMethod]
+    public void EmptyDestinationIsNotAcceptedAfterSuccessfulInputSend()
+    {
+        var verification = CodexComposerWriteVerifier.Verify(
+            "# CODEX_TASK\n\nfirst\nmiddle\nlast",
+            valueAvailable: true,
+            value: string.Empty,
+            textAvailable: true,
+            text: string.Empty);
+
+        Assert.IsFalse(verification.IsVerified);
+        Assert.IsFalse(verification.IsRichTextTransformedAccepted);
+        Assert.AreEqual(0, verification.SemanticAnchorMatchedCount);
+    }
+
+    [TestMethod]
     public void ReferencedPastedTextSignalIsSeparateFromInlineEquality()
     {
         Assert.IsTrue(CodexComposerWriteVerifier.HasReferencedPastedTextSignal(
@@ -738,6 +1017,127 @@ public sealed class CodexDesktopComposerTests
             "pasted text file: C:\\Users\\SleepyCobalt\\..."));
         Assert.IsFalse(CodexComposerWriteVerifier.HasReferencedPastedTextSignal(
             "ordinary composer text"));
+    }
+
+    [TestMethod]
+    public void CurrentAttachmentActionIsDetectedWithoutRecordingTitleContent()
+    {
+        var match = CodexComposerAttachmentDetector.TryClassify(
+            new CodexComposerAttachmentNodeMetadata(
+                "ControlType.Button",
+                "paste-action",
+                "在文本框中显示",
+                "AttachmentAction",
+                "Chromium",
+                "Group > Custom",
+                new UiAutomationBounds(10, 700, 120, 28),
+                new UiAutomationBounds(0, 500, 600, 300),
+                IsOffscreen: false,
+                IsWithinComposerScope: true,
+                ChildCount: 0,
+                HasInvokePattern: true,
+                LocalizedControlType: "button",
+                HelpText: string.Empty,
+                ItemStatus: string.Empty,
+                ItemType: string.Empty));
+
+        Assert.AreEqual("action", match);
+    }
+
+    [TestMethod]
+    public void AttachmentCardStructureIsDetectedWithStableMetadata()
+    {
+        var match = CodexComposerAttachmentDetector.TryClassify(
+            new CodexComposerAttachmentNodeMetadata(
+                "ControlType.Group",
+                "pasted-text-card",
+                "# CODEX_TASK hidden title",
+                "CodexAttachmentCard",
+                "Chromium",
+                "Document > Group",
+                new UiAutomationBounds(10, 600, 400, 90),
+                new UiAutomationBounds(0, 500, 600, 300),
+                IsOffscreen: false,
+                IsWithinComposerScope: true,
+                ChildCount: 2,
+                HasInvokePattern: false,
+                LocalizedControlType: "group",
+                HelpText: string.Empty,
+                ItemStatus: string.Empty,
+                ItemType: string.Empty));
+
+        Assert.AreEqual("structure", match);
+    }
+
+    [TestMethod]
+    public void UnrelatedTooltipIsNotAnAttachment()
+    {
+        var match = CodexComposerAttachmentDetector.TryClassify(
+            new CodexComposerAttachmentNodeMetadata(
+                "ControlType.ToolTip",
+                string.Empty,
+                "Helpful tip",
+                "ToolTip",
+                "Chromium",
+                "Pane",
+                new UiAutomationBounds(10, 600, 200, 40),
+                new UiAutomationBounds(0, 500, 600, 300),
+                IsOffscreen: false,
+                IsWithinComposerScope: true,
+                ChildCount: 0,
+                HasInvokePattern: false,
+                LocalizedControlType: "tool tip",
+                HelpText: string.Empty,
+                ItemStatus: string.Empty,
+                ItemType: string.Empty));
+
+        Assert.IsNull(match);
+    }
+
+    [TestMethod]
+    public void NewAttachmentCardIsAcceptedButExistingCardIsNotNew()
+    {
+        var before = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["runtime:existing-card"] = "structure"
+            });
+        var unchanged = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["runtime:existing-card"] = "structure"
+            });
+        var afterPaste = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(StringComparer.Ordinal),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["runtime:existing-card"] = "structure",
+                ["runtime:new-card-action"] = "action"
+            });
+
+        Assert.IsFalse(unchanged.HasNewAttachmentsSince(before));
+        Assert.IsTrue(afterPaste.HasNewAttachmentsSince(before));
+        Assert.IsTrue(afterPaste.HasNewReferencesSince(before));
+        Assert.AreEqual("action", afterPaste.GetNewDetectionKindSince(before));
+    }
+
+    [TestMethod]
+    public void NoNewAttachmentOrReferenceDoesNotAcceptFailedInlinePaste()
+    {
+        var before = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(["runtime:existing"], StringComparer.Ordinal));
+        var after = new CodexComposerReferenceSnapshot(
+            true,
+            new HashSet<string>(["runtime:existing"], StringComparer.Ordinal));
+
+        Assert.IsFalse(after.HasNewReferencesSince(before));
+        Assert.AreEqual("none", after.GetNewDetectionKindSince(before));
     }
 
     [TestMethod]

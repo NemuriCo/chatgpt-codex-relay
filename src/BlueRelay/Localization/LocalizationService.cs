@@ -107,18 +107,21 @@ public sealed class UiTextSet
     public required string FillCodex { get; init; }
     public required string CodexComposerFilled { get; init; }
     public required string CodexComposerFilledClipboardRestoreFailed { get; init; }
+    public required string CodexComposerFilledClipboardWarning { get; init; }
     public required string CodexComposerClipboardReferenceAccepted { get; init; }
     public required string CodexComposerClipboardReferenceAcceptedRestoreFailed { get; init; }
     public required string CodexComposerClipboardRestoreFailed { get; init; }
     public required string CodexComposerVerificationFailed { get; init; }
     public required string CodexComposerNotFound { get; init; }
     public required string CodexComposerClipboardUnsafe { get; init; }
+    public required string CodexComposerClipboardWriteFailed { get; init; }
     public required string CodexComposerTaskEmpty { get; init; }
     public required string CodexComposerInjectionFailed { get; init; }
     public required string CodexComposerSearching { get; init; }
     public required string CodexComposerProbeTimeout { get; init; }
     public required string CodexComposerBusy { get; init; }
     public required string CodexComposerCancelled { get; init; }
+    public required string CodexComposerForegroundFailed { get; init; }
     public required string CodexComposerExistingTextTitle { get; init; }
     public required string CodexComposerExistingTextMessage { get; init; }
     public required string CodexComposerContentUnknownTitle { get; init; }
@@ -304,18 +307,21 @@ public static class LocalizationService
         FillCodex = "Fill into Codex",
         CodexComposerFilled = "Filled into Codex. Review it and send manually.",
         CodexComposerFilledClipboardRestoreFailed = "Filled into Codex, but the original plain-text clipboard could not be restored.",
+        CodexComposerFilledClipboardWarning = "Filled into Codex, but the original clipboard contents could not be fully preserved or restored.",
         CodexComposerClipboardReferenceAccepted = "The long text was accepted by Codex as a pasted-text reference. Review it and send manually.",
         CodexComposerClipboardReferenceAcceptedRestoreFailed = "The long text was accepted by Codex as a pasted-text reference, but the original plain-text clipboard could not be restored.",
         CodexComposerClipboardRestoreFailed = "Codex filling did not complete, and the original plain-text clipboard could not be restored.",
         CodexComposerVerificationFailed = "The Codex input box did not contain the complete task text. Try again.",
         CodexComposerNotFound = "No editable Codex input box was found.\nOpen a Codex session and try again.",
         CodexComposerClipboardUnsafe = "The clipboard could not be used safely for Codex input. Close other clipboard content and try again.",
+        CodexComposerClipboardWriteFailed = "BlueRelay could not verify the task text in the clipboard. Try again.",
         CodexComposerTaskEmpty = "The current task is empty and could not be filled into Codex.",
         CodexComposerInjectionFailed = "BlueRelay could not fill the Codex input box. Try again.",
         CodexComposerSearching = "Looking for the Codex input box…",
         CodexComposerProbeTimeout = "Looking for the Codex input box timed out. Make sure a Codex session is open and try again.",
         CodexComposerBusy = "A Codex input operation is already in progress. Please wait and try again.",
         CodexComposerCancelled = "Filling the Codex input box was cancelled.",
+        CodexComposerForegroundFailed = "Codex could not be activated as the foreground window. Bring Codex to the front and try again.",
         CodexComposerExistingTextTitle = "Replace existing Codex text?",
         CodexComposerExistingTextMessage = "The Codex composer already contains text. Replace it with the current task? The existing text will be overwritten.",
         CodexComposerContentUnknownTitle = "Confirm replacing Codex composer content",
@@ -500,18 +506,21 @@ public static class LocalizationService
         FillCodex = "填入 Codex",
         CodexComposerFilled = "已填入 Codex，等待你检查并发送。",
         CodexComposerFilledClipboardRestoreFailed = "已填入 Codex，但原纯文本剪贴板未能恢复。",
+        CodexComposerFilledClipboardWarning = "已填入 Codex，但原剪贴板内容未能完整保存或恢复。",
         CodexComposerClipboardReferenceAccepted = "长文本已作为 Codex 粘贴引用填入，请检查后发送。",
         CodexComposerClipboardReferenceAcceptedRestoreFailed = "长文本已作为 Codex 粘贴引用填入，但原纯文本剪贴板未能恢复。",
         CodexComposerClipboardRestoreFailed = "填入 Codex 未完成，且原纯文本剪贴板未能恢复。",
         CodexComposerVerificationFailed = "Codex 输入框未能完整写入任务内容，请重试。",
         CodexComposerNotFound = "没有找到可编辑的 Codex 输入框。\n请先打开 Codex 会话后重试。",
         CodexComposerClipboardUnsafe = "无法安全使用剪贴板填入 Codex。请关闭其他剪贴板内容后重试。",
+        CodexComposerClipboardWriteFailed = "无法确认任务文本已写入剪贴板，请重试。",
         CodexComposerTaskEmpty = "当前任务为空，无法填入 Codex。",
         CodexComposerInjectionFailed = "无法填入 Codex，请重试。",
         CodexComposerSearching = "正在查找 Codex 输入框…",
         CodexComposerProbeTimeout = "查找 Codex 输入框超时，请确认 Codex 会话已打开后重试。",
         CodexComposerBusy = "已有一次 Codex 输入操作正在进行，请稍候再试。",
         CodexComposerCancelled = "已取消填入 Codex。",
+        CodexComposerForegroundFailed = "无法将 Codex 激活为前台窗口，请先将 Codex 切到前台后重试。",
         CodexComposerExistingTextTitle = "替换 Codex 中已有文字？",
         CodexComposerExistingTextMessage = "Codex 输入框中已有文字。要用当前任务替换它吗？现有文字会被覆盖。",
         CodexComposerContentUnknownTitle = "确认替换 Codex 输入框内容",
