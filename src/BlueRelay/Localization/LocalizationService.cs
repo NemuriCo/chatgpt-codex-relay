@@ -126,6 +126,15 @@ public sealed class UiTextSet
     public required string CodexComposerExistingTextMessage { get; init; }
     public required string CodexComposerContentUnknownTitle { get; init; }
     public required string CodexComposerContentUnknownMessage { get; init; }
+    public required string CodexSendSearching { get; init; }
+    public required string CodexSendSucceeded { get; init; }
+    public required string CodexSendFailed { get; init; }
+    public required string CodexSendComposerEmpty { get; init; }
+    public required string CodexSendContentUnknown { get; init; }
+    public required string CodexSendButtonNotFound { get; init; }
+    public required string CodexSendInvokeFailed { get; init; }
+    public required string CodexSendWindowChanged { get; init; }
+    public required string CodexFillSendFailed { get; init; }
     public required string FocusedComposerProbeTitle { get; init; }
     public required string FocusedComposerProbeInstructions { get; init; }
     public required string FocusedComposerProbeHotkey { get; init; }
@@ -303,13 +312,13 @@ public static class LocalizationService
         CodexSessionRetried = "A new Codex session was started and the task was retried.",
         CopyCodexThreadId = "Copy Codex thread ID",
         CodexThreadIdCopied = "Codex thread ID copied.",
-        SendToCodex = "Confirm send",
+        SendToCodex = "Send to Codex",
         FillCodex = "Fill into Codex",
-        CodexComposerFilled = "Filled into Codex. Review it and send manually.",
-        CodexComposerFilledClipboardRestoreFailed = "Filled into Codex, but the original plain-text clipboard could not be restored.",
-        CodexComposerFilledClipboardWarning = "Filled into Codex, but the original clipboard contents could not be fully preserved or restored.",
-        CodexComposerClipboardReferenceAccepted = "The long text was accepted by Codex as a pasted-text reference. Review it and send manually.",
-        CodexComposerClipboardReferenceAcceptedRestoreFailed = "The long text was accepted by Codex as a pasted-text reference, but the original plain-text clipboard could not be restored.",
+        CodexComposerFilled = "Filled into Codex. You can edit it, then click \"Send to Codex\".",
+        CodexComposerFilledClipboardRestoreFailed = "Filled into Codex, but the original plain-text clipboard could not be restored. You can edit it, then click \"Send to Codex\".",
+        CodexComposerFilledClipboardWarning = "Filled into Codex, but the original clipboard contents could not be fully preserved or restored. You can edit it, then click \"Send to Codex\".",
+        CodexComposerClipboardReferenceAccepted = "The long text was accepted by Codex as a pasted-text reference. Review it, then click \"Send to Codex\".",
+        CodexComposerClipboardReferenceAcceptedRestoreFailed = "The long text was accepted by Codex as a pasted-text reference, but the original plain-text clipboard could not be restored. Review it, then click \"Send to Codex\".",
         CodexComposerClipboardRestoreFailed = "Codex filling did not complete, and the original plain-text clipboard could not be restored.",
         CodexComposerVerificationFailed = "The Codex input box did not contain the complete task text. Try again.",
         CodexComposerNotFound = "No editable Codex input box was found.\nOpen a Codex session and try again.",
@@ -326,6 +335,15 @@ public static class LocalizationService
         CodexComposerExistingTextMessage = "The Codex composer already contains text. Replace it with the current task? The existing text will be overwritten.",
         CodexComposerContentUnknownTitle = "Confirm replacing Codex composer content",
         CodexComposerContentUnknownMessage = "BlueRelay could not safely determine whether the Codex composer is empty. Replace its content only if you are sure.",
+        CodexSendSearching = "Looking for the Codex send button…",
+        CodexSendSucceeded = "Sent to Codex.",
+        CodexSendFailed = "BlueRelay could not send to Codex. Check Codex and retry.",
+        CodexSendComposerEmpty = "The Codex input box is empty. BlueRelay did not send again to avoid a duplicate.",
+        CodexSendContentUnknown = "BlueRelay could not safely verify the current Codex input box content.",
+        CodexSendButtonNotFound = "No usable Codex send button was found. Make sure the current input can be sent and retry.",
+        CodexSendInvokeFailed = "BlueRelay could not trigger Codex send. Check Codex and retry.",
+        CodexSendWindowChanged = "The original Codex window changed. Fill the task again before sending.",
+        CodexFillSendFailed = "Filled into Codex, but automatic send failed. Check it and click \"Send to Codex\" again.",
         FocusedComposerProbeTitle = "Focused Composer UIA Probe",
         FocusedComposerProbeInstructions = "Click the Codex composer first, then press the global hotkey without clicking BlueRelay.",
         FocusedComposerProbeHotkey = "Hotkey: Ctrl + Alt + B",
@@ -502,13 +520,13 @@ public static class LocalizationService
         CodexSessionRetried = "已新建 Codex 会话并重试当前任务。",
         CopyCodexThreadId = "复制 Codex 线程 ID",
         CodexThreadIdCopied = "Codex 线程 ID 已复制。",
-        SendToCodex = "确认发送",
+        SendToCodex = "发送到 Codex",
         FillCodex = "填入 Codex",
-        CodexComposerFilled = "已填入 Codex，等待你检查并发送。",
-        CodexComposerFilledClipboardRestoreFailed = "已填入 Codex，但原纯文本剪贴板未能恢复。",
-        CodexComposerFilledClipboardWarning = "已填入 Codex，但原剪贴板内容未能完整保存或恢复。",
-        CodexComposerClipboardReferenceAccepted = "长文本已作为 Codex 粘贴引用填入，请检查后发送。",
-        CodexComposerClipboardReferenceAcceptedRestoreFailed = "长文本已作为 Codex 粘贴引用填入，但原纯文本剪贴板未能恢复。",
+        CodexComposerFilled = "已填入 Codex，可修改后点击“发送到 Codex”。",
+        CodexComposerFilledClipboardRestoreFailed = "已填入 Codex，但原纯文本剪贴板未能恢复。可修改后点击“发送到 Codex”。",
+        CodexComposerFilledClipboardWarning = "已填入 Codex，但原剪贴板内容未能完整保存或恢复。可修改后点击“发送到 Codex”。",
+        CodexComposerClipboardReferenceAccepted = "长文本已作为 Codex 粘贴引用填入，请检查后点击“发送到 Codex”。",
+        CodexComposerClipboardReferenceAcceptedRestoreFailed = "长文本已作为 Codex 粘贴引用填入，但原纯文本剪贴板未能恢复。请检查后点击“发送到 Codex”。",
         CodexComposerClipboardRestoreFailed = "填入 Codex 未完成，且原纯文本剪贴板未能恢复。",
         CodexComposerVerificationFailed = "Codex 输入框未能完整写入任务内容，请重试。",
         CodexComposerNotFound = "没有找到可编辑的 Codex 输入框。\n请先打开 Codex 会话后重试。",
@@ -525,6 +543,15 @@ public static class LocalizationService
         CodexComposerExistingTextMessage = "Codex 输入框中已有文字。要用当前任务替换它吗？现有文字会被覆盖。",
         CodexComposerContentUnknownTitle = "确认替换 Codex 输入框内容",
         CodexComposerContentUnknownMessage = "BlueRelay 无法安全确认 Codex 输入框是否为空。只有确定要替换时才继续。",
+        CodexSendSearching = "正在查找 Codex 发送按钮…",
+        CodexSendSucceeded = "已发送到 Codex。",
+        CodexSendFailed = "无法发送到 Codex，请检查 Codex 后重试。",
+        CodexSendComposerEmpty = "Codex 输入框当前为空，未再次发送，以避免重复。",
+        CodexSendContentUnknown = "无法安全确认当前 Codex 输入框内容。",
+        CodexSendButtonNotFound = "未找到可用的 Codex 发送按钮，请确认 Codex 输入框可发送后重试。",
+        CodexSendInvokeFailed = "未能触发 Codex 发送，请检查 Codex 后重试。",
+        CodexSendWindowChanged = "原 Codex 窗口已变化，请重新填入后再发送。",
+        CodexFillSendFailed = "已填入 Codex，但未能自动发送。请检查后再次点击“发送到 Codex”。",
         FocusedComposerProbeTitle = "焦点 Composer UIA 诊断",
         FocusedComposerProbeInstructions = "请先点击 Codex 输入框，再在不点击 BlueRelay 的情况下按全局热键。",
         FocusedComposerProbeHotkey = "热键：Ctrl + Alt + B",

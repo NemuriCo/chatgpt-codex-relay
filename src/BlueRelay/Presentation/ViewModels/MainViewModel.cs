@@ -26,6 +26,10 @@ public sealed class MainViewModel : ObservableObject
     private readonly BrowserBridgeService _browserBridge;
     private readonly ICodexBridge? _codexBridge;
     private readonly ICodexDesktopComposerInjector _codexDesktopComposerInjector;
+    private readonly ICodexDesktopComposerSender _codexDesktopComposerSender;
+    private readonly Dictionary<Guid, CodexFillReceipt> _codexFillReceipts = [];
+    private readonly Dictionary<Guid, long> _codexFillGenerations = [];
+    private readonly SemaphoreSlim _codexDesktopActionGate = new(1, 1);
     private readonly FocusedComposerProbeService _focusedComposerProbeService;
     private readonly RelayCommand _editProjectCommand;
     private readonly RelayCommand _deleteProjectCommand;
@@ -40,6 +44,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly RelayCommand _selectWorkstreamCommand;
     private readonly RelayCommand _confirmTaskCommand;
     private readonly RelayCommand _fillCodexCommand;
+    private readonly RelayCommand _sendToCodexCommand;
     private readonly RelayCommand _prepareFocusedComposerProbeCommand;
     private readonly RelayCommand _cancelCodexTaskCommand;
     private readonly RelayCommand _resetCodexThreadCommand;
@@ -89,6 +94,7 @@ public sealed class MainViewModel : ObservableObject
     private string _simulatedResultText = string.Empty;
     private string _focusedComposerProbeDiagnostics = string.Empty;
     private bool _isFocusedComposerProbeRunning;
+    private bool _isCodexDesktopActionBusy;
     private WorkflowState _manualState;
 
     public MainViewModel(
@@ -111,7 +117,8 @@ public sealed class MainViewModel : ObservableObject
         BrowserBridgeService? browserBridge = null,
         ICodexBridge? codexBridge = null,
         ICodexDesktopComposerInjector? codexDesktopComposerInjector = null,
-        FocusedComposerProbeService? focusedComposerProbeService = null)
+        FocusedComposerProbeService? focusedComposerProbeService = null,
+        ICodexDesktopComposerSender? codexDesktopComposerSender = null)
     {
         _state = state;
         _projectService = projectService;
@@ -121,6 +128,7 @@ public sealed class MainViewModel : ObservableObject
         _browserBridge = browserBridge ?? new BrowserBridgeService(state, projectService);
         _codexBridge = codexBridge ?? _browserBridge.CodexBridge;
         _codexDesktopComposerInjector = codexDesktopComposerInjector ?? new WindowsCodexDesktopComposerInjector();
+        _codexDesktopComposerSender = codexDesktopComposerSender ?? new WindowsCodexDesktopComposerSender();
         _focusedComposerProbeService = focusedComposerProbeService ?? new FocusedComposerProbeService();
         Ui = LocalizationService.Current;
         _isAlwaysOnTop = state.IsAlwaysOnTop;
@@ -135,8 +143,9 @@ public sealed class MainViewModel : ObservableObject
         ToggleCollapsedCommand = new RelayCommand(ToggleCollapsed);
         _selectProjectCommand = new RelayCommand(SelectProject);
         _selectWorkstreamCommand = new RelayCommand(SelectWorkstream);
-        _confirmTaskCommand = new RelayCommand(ConfirmTaskAsync, CanRunTaskAction);
-        _fillCodexCommand = new RelayCommand(FillCodexAsync, CanRunTaskAction);
+        _confirmTaskCommand = new RelayCommand(SendToCodexAsync, CanSendToCodexAction);
+        _fillCodexCommand = new RelayCommand(FillCodexAsync, CanFillCodexAction);
+        _sendToCodexCommand = new RelayCommand(SendToCodexAsync, CanSendToCodexAction);
         _prepareFocusedComposerProbeCommand = new RelayCommand(PrepareFocusedComposerProbe);
         _cancelCodexTaskCommand = new RelayCommand(CancelCodexTaskAsync, CanCancelCodexTask);
         _resetCodexThreadCommand = new RelayCommand(ResetCodexThreadAsync, CanSelectWorkstream);
@@ -240,6 +249,8 @@ public sealed class MainViewModel : ObservableObject
     public ICommand ConfirmTaskCommand => _confirmTaskCommand;
 
     public ICommand FillCodexCommand => _fillCodexCommand;
+
+    public ICommand SendToCodexCommand => _sendToCodexCommand;
 
     public ICommand PrepareFocusedComposerProbeCommand => _prepareFocusedComposerProbeCommand;
 
@@ -726,9 +737,14 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    public Task StopCodexAsync()
+    public async Task StopCodexAsync()
     {
-        return _codexBridge?.StopAsync() ?? Task.CompletedTask;
+        _codexFillReceipts.Clear();
+        _codexFillGenerations.Clear();
+        if (_codexBridge is not null)
+        {
+            await _codexBridge.StopAsync().ConfigureAwait(false);
+        }
     }
 
     public void SetBrowserBridgeStatus(bool isAvailable, string? status)
@@ -1320,8 +1336,32 @@ public sealed class MainViewModel : ObservableObject
             nextWorkstream.Refresh();
         }
 
+        ReconcileCodexFillReceipts();
         RefreshTaskDetailWorkstream();
         RaiseCommandStates();
+    }
+
+    private void ReconcileCodexFillReceipts()
+    {
+        foreach (var pair in _codexFillReceipts.ToList())
+        {
+            var workstream = _projectService.FindWorkstreamForId(pair.Key);
+            var taskIdMatches = workstream is not null &&
+                                string.Equals(
+                                    workstream.CurrentTaskId,
+                                    pair.Value.TaskId.ToString("D"),
+                                    StringComparison.OrdinalIgnoreCase);
+            if (workstream is null ||
+                workstream.CurrentState != WorkflowState.ReadyForCodex ||
+                !taskIdMatches)
+            {
+                _codexFillReceipts.Remove(pair.Key);
+                StartupDiagnostics.Write(
+                    $"codex_fill_receipt_cleared workstreamId={pair.Key} " +
+                    $"taskId={pair.Value.TaskId} generation={pair.Value.FillGeneration} " +
+                    "reason=workstream_task_or_state_changed");
+            }
+        }
     }
 
     private void RefreshTaskDetailWorkstream()
@@ -1386,9 +1426,18 @@ public sealed class MainViewModel : ObservableObject
         return (parameter as ProjectListItemViewModel ?? SelectedWorkstream)?.Workstream.CodexThreadId is { Length: > 0 };
     }
 
-    private bool CanRunTaskAction(object? parameter)
+    private bool CanFillCodexAction(object? parameter)
     {
-        return parameter is ProjectListItemViewModel item && item.CanSendToCodex;
+        return !_isCodexDesktopActionBusy &&
+               parameter is ProjectListItemViewModel item &&
+               item.CanFillCodex;
+    }
+
+    private bool CanSendToCodexAction(object? parameter)
+    {
+        return !_isCodexDesktopActionBusy &&
+               parameter is ProjectListItemViewModel item &&
+               item.CanSendToCodex;
     }
 
     private bool CanCancelCodexTask(object? parameter)
@@ -1415,25 +1464,7 @@ public sealed class MainViewModel : ObservableObject
             : DebugWorkstream?.IsCodexRunning == true && DebugWorkstream.CurrentTask is not null;
     }
 
-    private async Task ConfirmTaskAsync(object? parameter)
-    {
-        if (parameter is not ProjectListItemViewModel item || item.CurrentTask is not { } task)
-        {
-            return;
-        }
-
-        var result = _codexBridge is null
-            ? await _browserBridge.ConfirmTaskAsync(task.Id)
-            : await _browserBridge.SendTaskToCodexAsync(task.Id, item.UserNote);
-        if (!result.Success)
-        {
-            SetStatus(result.Error, isError: true);
-            return;
-        }
-
-        RefreshData(item.ProjectId, item.Id);
-        SetStatus(_codexBridge is null ? Ui.CodexSimulationStarted : Ui.CodexRunning);
-    }
+    private Task ConfirmTaskAsync(object? parameter) => SendToCodexAsync(parameter);
 
     private void PrepareFocusedComposerProbe()
     {
@@ -1492,11 +1523,32 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task FillCodexAsync(object? parameter)
     {
-        if (parameter is not ProjectListItemViewModel item || item.CurrentTask is not { } task)
+        if (parameter is not ProjectListItemViewModel item || item.CurrentTask is not { } task ||
+            !TryBeginCodexDesktopAction())
         {
             return;
         }
 
+        try
+        {
+            await FillCodexCoreAsync(item, task).ConfigureAwait(true);
+        }
+        finally
+        {
+            EndCodexDesktopAction();
+        }
+    }
+
+    private async Task FillCodexCoreAsync(
+        ProjectListItemViewModel item,
+        RelayTask task)
+    {
+        if (!IsCurrentReadyForCodex(item, task.Id))
+        {
+            return;
+        }
+
+        var fillGeneration = BeginFillReceiptGeneration(item.Id);
         CodexComposerDiagnostics.WriteStage("fill_clicked");
         SetStatus(Ui.CodexComposerSearching);
         var prompt = RelayPromptComposer.Compose(task.UserNote, task.Prompt);
@@ -1573,6 +1625,216 @@ public sealed class MainViewModel : ObservableObject
                 ? Ui.CodexComposerClipboardReferenceAccepted
                 : Ui.CodexComposerFilled);
         }
+
+        if (result.FillTarget is null)
+        {
+            StartupDiagnostics.Write(
+                $"codex_fill_receipt_not_created workstreamId={item.Id} taskId={task.Id} " +
+                "reason=fill_target_unavailable");
+            return;
+        }
+
+        if (!IsCurrentReadyForCodex(item, task.Id))
+        {
+            StartupDiagnostics.Write(
+                $"codex_fill_receipt_not_created workstreamId={item.Id} taskId={task.Id} " +
+                "reason=stale_task_or_state");
+            return;
+        }
+
+        var target = result.FillTarget;
+        var receipt = new CodexFillReceipt(
+            item.ProjectId,
+            item.Id,
+            task.Id,
+            fillGeneration,
+            target.WindowHandle,
+            target.ProcessId,
+            target.VerificationMode,
+            target.FilledAtUtc,
+            ComposerAutomationId: target.ComposerAutomationId,
+            ComposerClassName: target.ComposerClassName,
+            ComposerParentHierarchy: target.ComposerParentHierarchy,
+            ComposerBounds: target.ComposerBounds);
+        _codexFillReceipts[item.Id] = receipt;
+        StartupDiagnostics.Write(
+            $"codex_fill_receipt_created workstreamId={item.Id} taskId={task.Id} " +
+            $"generation={fillGeneration} hwnd={receipt.WindowHandle.ToInt64()} " +
+            $"pid={receipt.ProcessId} verificationMode={receipt.VerificationMode}");
+    }
+
+    private async Task SendToCodexAsync(object? parameter)
+    {
+        if (parameter is not ProjectListItemViewModel item || item.CurrentTask is not { } task ||
+            !TryBeginCodexDesktopAction())
+        {
+            return;
+        }
+
+        try
+        {
+            var receiptWasPresent = TryGetCurrentReceipt(item, task.Id, out var receipt);
+            if (!receiptWasPresent)
+            {
+                await FillCodexCoreAsync(item, task).ConfigureAwait(true);
+                if (!TryGetCurrentReceipt(item, task.Id, out receipt))
+                {
+                    return;
+                }
+            }
+
+            if (receipt is null || !IsReceiptCurrent(item, task.Id, receipt))
+            {
+                ClearFillReceipt(item.Id, "stale_before_send");
+                SetStatus(Ui.CodexSendWindowChanged, isError: true);
+                return;
+            }
+
+            SetStatus(Ui.CodexSendSearching);
+            StartupDiagnostics.Write(
+                $"codex_send_clicked workstreamId={item.Id} taskId={task.Id} " +
+                $"mode={(receiptWasPresent ? "existing_fill" : "fill_then_send")}");
+            var sendResult = await _codexDesktopComposerSender
+                .SendAsync(receipt)
+                .ConfigureAwait(true);
+            if (!sendResult.Success)
+            {
+                if (sendResult.Code == "codex_send_window_changed")
+                {
+                    ClearFillReceipt(item.Id, "target_window_changed");
+                }
+
+                SetStatus(
+                    receiptWasPresent
+                        ? GetSendFailureMessage(sendResult)
+                        : Ui.CodexFillSendFailed,
+                    isError: true);
+                return;
+            }
+
+            if (!IsReceiptCurrent(item, task.Id, receipt))
+            {
+                ClearFillReceipt(item.Id, "stale_after_send");
+                StartupDiagnostics.Write(
+                    $"codex_send_state_transition success=false workstreamId={item.Id} " +
+                    $"taskId={task.Id} reason=stale_guard");
+                return;
+            }
+
+            var stateResult = await _projectService.TryChangeStateAsync(
+                item.ProjectId,
+                item.Id,
+                WorkflowState.CodexRunning,
+                manualOverride: false).ConfigureAwait(true);
+            StartupDiagnostics.Write(
+                $"codex_send_state_transition success={stateResult.Success} " +
+                $"workstreamId={item.Id} taskId={task.Id}");
+            if (!stateResult.Success)
+            {
+                SetStatus(stateResult.Error, isError: true);
+                return;
+            }
+
+            ClearFillReceipt(item.Id, "send_succeeded");
+            RefreshData(item.ProjectId, item.Id);
+            SetStatus(Ui.CodexSendSucceeded);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus(Ui.CodexSendFailed, isError: true);
+        }
+        catch (Exception exception)
+        {
+            StartupDiagnostics.WriteException("Send to Codex command", exception);
+            SetStatus(Ui.CodexSendFailed, isError: true);
+        }
+        finally
+        {
+            EndCodexDesktopAction();
+        }
+    }
+
+    private long BeginFillReceiptGeneration(Guid workstreamId)
+    {
+        _codexFillReceipts.Remove(workstreamId);
+        var generation = _codexFillGenerations.TryGetValue(workstreamId, out var previous)
+            ? previous + 1
+            : 1;
+        _codexFillGenerations[workstreamId] = generation;
+        StartupDiagnostics.Write(
+            $"codex_fill_receipt_cleared workstreamId={workstreamId} " +
+            $"generation={generation} reason=fill_started");
+        return generation;
+    }
+
+    private bool TryGetCurrentReceipt(
+        ProjectListItemViewModel item,
+        Guid taskId,
+        out CodexFillReceipt? receipt)
+    {
+        if (_codexFillReceipts.TryGetValue(item.Id, out receipt) &&
+            IsReceiptCurrent(item, taskId, receipt))
+        {
+            return true;
+        }
+
+        receipt = null;
+        return false;
+    }
+
+    private bool IsReceiptCurrent(
+        ProjectListItemViewModel item,
+        Guid taskId,
+        CodexFillReceipt receipt)
+    {
+        var workstream = _projectService.FindWorkstream(item.ProjectId, item.Id);
+        return workstream is not null &&
+               workstream.CurrentState == WorkflowState.ReadyForCodex &&
+               string.Equals(workstream.CurrentTaskId, taskId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+               receipt.ProjectId == item.ProjectId &&
+               receipt.WorkstreamId == item.Id &&
+               receipt.TaskId == taskId &&
+               _codexFillGenerations.TryGetValue(item.Id, out var currentGeneration) &&
+               receipt.FillGeneration == currentGeneration &&
+               _codexFillReceipts.TryGetValue(item.Id, out var current) &&
+               current == receipt;
+    }
+
+    private bool IsCurrentReadyForCodex(ProjectListItemViewModel item, Guid taskId)
+    {
+        var workstream = _projectService.FindWorkstream(item.ProjectId, item.Id);
+        return workstream is not null &&
+               workstream.CurrentState == WorkflowState.ReadyForCodex &&
+               string.Equals(workstream.CurrentTaskId, taskId.ToString("D"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ClearFillReceipt(Guid workstreamId, string reason)
+    {
+        if (_codexFillReceipts.Remove(workstreamId, out var receipt))
+        {
+            StartupDiagnostics.Write(
+                $"codex_fill_receipt_cleared workstreamId={workstreamId} " +
+                $"taskId={receipt.TaskId} generation={receipt.FillGeneration} reason={reason}");
+        }
+    }
+
+    private bool TryBeginCodexDesktopAction()
+    {
+        if (!_codexDesktopActionGate.Wait(0))
+        {
+            return false;
+        }
+
+        _isCodexDesktopActionBusy = true;
+        RaiseCommandStates();
+        return true;
+    }
+
+    private void EndCodexDesktopAction()
+    {
+        _isCodexDesktopActionBusy = false;
+        _codexDesktopActionGate.Release();
+        RaiseCommandStates();
     }
 
     private string GetComposerFailureMessage(CodexComposerInjectionResult result)
@@ -1594,6 +1856,20 @@ public sealed class MainViewModel : ObservableObject
             "codex_task_empty" => Ui.CodexComposerTaskEmpty,
             "codex_composer_verification_failed" => Ui.CodexComposerVerificationFailed,
             _ => Ui.CodexComposerInjectionFailed
+        };
+    }
+
+    private string GetSendFailureMessage(CodexComposerSendResult result)
+    {
+        return result.Code switch
+        {
+            "codex_send_composer_empty" => Ui.CodexSendComposerEmpty,
+            "codex_send_button_not_found" => Ui.CodexSendButtonNotFound,
+            "codex_send_invoke_failed" => Ui.CodexSendInvokeFailed,
+            "codex_send_window_changed" => Ui.CodexSendWindowChanged,
+            "codex_send_probe_timeout" => Ui.CodexSendFailed,
+            "codex_send_composer_content_unknown" => Ui.CodexSendContentUnknown,
+            _ => Ui.CodexSendFailed
         };
     }
 
@@ -1958,6 +2234,7 @@ public sealed class MainViewModel : ObservableObject
         _cancelWorkstreamEditCommand.RaiseCanExecuteChanged();
         _confirmTaskCommand.RaiseCanExecuteChanged();
         _fillCodexCommand.RaiseCanExecuteChanged();
+        _sendToCodexCommand.RaiseCanExecuteChanged();
         _cancelCodexTaskCommand.RaiseCanExecuteChanged();
         _resetCodexThreadCommand.RaiseCanExecuteChanged();
         _newCodexSessionAndRetryCommand.RaiseCanExecuteChanged();

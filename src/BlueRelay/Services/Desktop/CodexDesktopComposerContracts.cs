@@ -77,7 +77,8 @@ public sealed record CodexComposerInjectionResult(
     bool ClipboardRestoreFailed = false,
     CodexComposerInjectionMode Mode = CodexComposerInjectionMode.Unknown,
     CodexClipboardSnapshotMode ClipboardSnapshotMode = CodexClipboardSnapshotMode.Full,
-    bool ClipboardRestoreUnavailable = false)
+    bool ClipboardRestoreUnavailable = false,
+    CodexComposerFillTarget? FillTarget = null)
 {
     public bool ClipboardWarning => ClipboardRestoreFailed || ClipboardRestoreUnavailable;
 
@@ -105,6 +106,16 @@ public sealed record CodexComposerInjectionResult(
         CodexComposerInjectionMode mode = CodexComposerInjectionMode.VerificationFailed) =>
         new(false, code, message, ClipboardRestoreFailed: clipboardRestoreFailed, Mode: mode);
 }
+
+public sealed record CodexComposerFillTarget(
+    IntPtr WindowHandle,
+    int ProcessId,
+    CodexComposerInjectionMode VerificationMode,
+    DateTimeOffset FilledAtUtc,
+    UiAutomationBounds? ComposerBounds = null,
+    string ComposerAutomationId = "",
+    string ComposerClassName = "",
+    string ComposerParentHierarchy = "");
 
 public readonly record struct CodexKeyboardInput(ushort VirtualKey, bool KeyUp);
 

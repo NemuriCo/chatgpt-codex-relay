@@ -104,16 +104,14 @@ public sealed class ProjectListItemViewModel : ObservableObject
     public bool HasCurrentResult => !string.IsNullOrWhiteSpace(CurrentTask?.Result);
 
     public bool CanSendToCodex =>
-        (CurrentState is WorkflowState.ReadyForCodex or WorkflowState.NeedsAttention or WorkflowState.Error) &&
+        CurrentState == WorkflowState.ReadyForCodex &&
         HasCurrentTask;
 
     public bool CanFillCodex =>
-        (CurrentState is WorkflowState.ReadyForCodex or WorkflowState.NeedsAttention or WorkflowState.Error) &&
+        CurrentState == WorkflowState.ReadyForCodex &&
         HasCurrentTask;
 
-    public string SendToCodexLabel => CurrentState is WorkflowState.NeedsAttention or WorkflowState.Error
-        ? _text.RetryCodex
-        : _text.SendToCodex;
+    public string SendToCodexLabel => _text.SendToCodex;
 
     public bool IsCodexRunning => CurrentState == WorkflowState.CodexRunning;
 

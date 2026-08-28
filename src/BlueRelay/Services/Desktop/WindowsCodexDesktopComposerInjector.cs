@@ -98,12 +98,12 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
 
         var stopwatch = Stopwatch.StartNew();
         return _operationCoordinator.RunAsync(
-            () =>
+            operationToken =>
             {
                 CodexComposerDiagnostics.WriteStage("worker_started", stopwatch);
                 return InjectOnWorker(
                     text,
-                    cancellationToken,
+                    operationToken,
                     stopwatch,
                     allowReplacingExistingText,
                     _keyboardInputSender);
@@ -130,6 +130,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         {
             CodexComposerDiagnostics.WriteStage("window_scan_completed", stopwatch);
         }
+        cancellationToken.ThrowIfCancellationRequested();
 
         IReadOnlyList<AutomationCandidate> candidates;
         CodexComposerDiagnostics.WriteStage("composer_search_started", stopwatch);
@@ -141,6 +142,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         {
             CodexComposerDiagnostics.WriteStage("composer_search_completed", stopwatch);
         }
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (!CodexComposerCandidateSelector.TrySelect(
                 candidates.Select(candidate => candidate.Candidate).ToList(),
@@ -180,13 +182,16 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         }
 
         StartupDiagnostics.Write("Codex composer result=composer_selected");
+        var targetProcessId = selectedWindow?.ProcessId ?? selected.Metadata.ProcessId;
         WritePayloadDiagnostics(text);
+        cancellationToken.ThrowIfCancellationRequested();
         var focusReady = false;
         var foregroundReady = false;
         var uiaFocus = false;
         CodexComposerDiagnostics.WriteStage("focus_started", stopwatch);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             foregroundReady = TryActivateCodexWindow(
                 selected.Metadata.Handle,
                 "composer_focus",
@@ -194,7 +199,9 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 out _);
             if (foregroundReady)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 target.SetFocus();
+                cancellationToken.ThrowIfCancellationRequested();
                 uiaFocus = HasFocus(target);
             }
 
@@ -222,6 +229,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             CodexComposerDiagnostics.WriteStage("focus_completed", stopwatch);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (!foregroundReady)
         {
             return CodexComposerInjectionResult.Failed(
@@ -241,6 +249,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         if (!allowReplacingExistingText)
         {
             var contentState = ReadExistingContent(target, selected);
+            cancellationToken.ThrowIfCancellationRequested();
             if (CodexComposerContentGuard.RequiresConfirmation(contentState, allowReplacingExistingText: false))
             {
                 CodexComposerDiagnostics.WriteStage(
@@ -263,6 +272,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         {
             if (CodexComposerCandidateSelector.RequiresClipboardPaste(selected))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 StartupDiagnostics.Write("Codex composer write_method=clipboard_prosemirror");
                 StartupDiagnostics.Write("Codex composer clipboard_fallback_started");
                 var pasteResult = PasteWithClipboardFallback(
@@ -277,27 +287,40 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                     CodexComposerDiagnostics.WriteStage("fill_verified", stopwatch);
                 }
 
-                return pasteResult;
+                return AttachFillTarget(
+                    pasteResult,
+                    selected.Metadata.Handle,
+                    targetProcessId,
+                    selected.Metadata);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             if (TrySetValue(target, text))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 StartupDiagnostics.Write("Codex composer write_method=value_pattern");
                 var verification = VerifyComposerWrite(target, text, cancellationToken);
                 WriteVerificationDiagnostics("value_pattern_write", verification);
                 if (verification.IsVerified)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     target.SetFocus();
+                    cancellationToken.ThrowIfCancellationRequested();
                     CodexComposerDiagnostics.WriteStage("fill_verified", stopwatch);
-                    return new CodexComposerInjectionResult(
+                    return AttachFillTarget(
+                        new CodexComposerInjectionResult(
                         true,
                         "codex_composer_value_verified",
                         "Codex composer filled and verified.",
-                        Mode: CodexComposerInjectionMode.ValuePatternVerified);
+                        Mode: CodexComposerInjectionMode.ValuePatternVerified),
+                        selected.Metadata.Handle,
+                        targetProcessId,
+                        selected.Metadata);
                 }
 
                 StartupDiagnostics.Write("Codex composer value_pattern_verification_failed");
-                if (!PrepareForClipboardFallback(target, keyboardInputSender))
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!PrepareForClipboardFallback(target, keyboardInputSender, cancellationToken))
                 {
                     return CodexComposerInjectionResult.Failed(
                         "codex_composer_verification_failed",
@@ -305,17 +328,22 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 }
 
                 StartupDiagnostics.Write("Codex composer clipboard_fallback_started");
-                return PasteWithClipboardFallback(
-                    target,
+                return AttachFillTarget(
+                    PasteWithClipboardFallback(
+                        target,
+                        selected.Metadata.Handle,
+                        text,
+                        cancellationToken,
+                        selectAllBeforePaste: false,
+                        keyboardInputSender),
                     selected.Metadata.Handle,
-                    text,
-                    cancellationToken,
-                    selectAllBeforePaste: false,
-                    keyboardInputSender);
+                    targetProcessId,
+                    selected.Metadata);
             }
 
             StartupDiagnostics.Write("Codex composer write_method=clipboard");
             StartupDiagnostics.Write("Codex composer clipboard_fallback_started");
+            cancellationToken.ThrowIfCancellationRequested();
             var fallbackResult = PasteWithClipboardFallback(
                 target,
                 selected.Metadata.Handle,
@@ -328,7 +356,11 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 CodexComposerDiagnostics.WriteStage("fill_verified", stopwatch);
             }
 
-            return fallbackResult;
+            return AttachFillTarget(
+                fallbackResult,
+                selected.Metadata.Handle,
+                targetProcessId,
+                selected.Metadata);
         }
         catch (ElementNotAvailableException exception)
         {
@@ -1003,16 +1035,20 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
 
     private static bool PrepareForClipboardFallback(
         AutomationElement target,
-        ICodexKeyboardInputSender keyboardInputSender)
+        ICodexKeyboardInputSender keyboardInputSender,
+        CancellationToken cancellationToken)
     {
-        if (TryClearPartialContent(target))
+        cancellationToken.ThrowIfCancellationRequested();
+        if (TryClearPartialContent(target, cancellationToken))
         {
             return true;
         }
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             target.SetFocus();
+            cancellationToken.ThrowIfCancellationRequested();
             var sendResult = keyboardInputSender.SendCtrlA();
             WriteKeyboardInputDiagnostics("select_all", sendResult);
             return sendResult.Succeeded;
@@ -1031,10 +1067,13 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         }
     }
 
-    private static bool TryClearPartialContent(AutomationElement target)
+    private static bool TryClearPartialContent(
+        AutomationElement target,
+        CancellationToken cancellationToken)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!target.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
             {
                 return false;
@@ -1046,8 +1085,10 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                 return false;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             valuePattern.SetValue(string.Empty);
-            var verification = VerifyComposerWrite(target, string.Empty, CancellationToken.None);
+            cancellationToken.ThrowIfCancellationRequested();
+            var verification = VerifyComposerWrite(target, string.Empty, cancellationToken);
             WriteVerificationDiagnostics("partial_content_clear", verification);
             return CodexComposerWriteVerifier.IsEmpty(verification);
         }
@@ -1219,7 +1260,9 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                     "Codex could not be made the foreground window for paste.");
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             target.SetFocus();
+            cancellationToken.ThrowIfCancellationRequested();
             var uiaFocus = HasFocus(target);
             var foregroundMatches = NativeMethods.GetForegroundWindow() == windowHandle;
             StartupDiagnostics.Write(
@@ -1241,6 +1284,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
 
             if (selectAllBeforePaste)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var selectAllResult = keyboardInputSender.SendCtrlA();
                 WriteKeyboardInputDiagnostics("select_all", selectAllResult);
                 if (!selectAllResult.Succeeded)
@@ -1297,8 +1341,10 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
             {
                 try
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var clipboardSet = clipboardWriteSkippedExistingPayload ||
-                                       TrySetClipboardText(text, "composer");
+                                       TrySetClipboardText(text, "composer", cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
                     var clipboardVerified = clipboardWriteSkippedExistingPayload ||
                                             TryVerifyClipboardText(
                                                 text,
@@ -1336,6 +1382,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                     }
                     else
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         var sendResult = keyboardInputSender.SendCtrlV();
                         WriteKeyboardInputDiagnostics("send_paste", sendResult);
                         if (!sendResult.Succeeded)
@@ -1346,6 +1393,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
                         }
                         else
                         {
+                            cancellationToken.ThrowIfCancellationRequested();
                             var acceptance = WaitForPasteAcceptance(
                                 target,
                                 text,
@@ -1460,8 +1508,10 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         CancellationToken cancellationToken,
         out ForegroundActivation activation)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var foregroundBefore = NativeMethods.GetForegroundWindow();
         var blueRelayWindowHandle = Process.GetCurrentProcess().MainWindowHandle;
+        cancellationToken.ThrowIfCancellationRequested();
         var setForegroundSucceeded = NativeMethods.SetForegroundWindow(codexWindowHandle);
         var foregroundAfter = foregroundBefore;
         var stopwatch = Stopwatch.StartNew();
@@ -1496,14 +1546,42 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         return setForegroundSucceeded && foregroundMatches;
     }
 
+    private static CodexComposerInjectionResult AttachFillTarget(
+        CodexComposerInjectionResult result,
+        IntPtr targetWindowHandle,
+        int targetProcessId,
+        UiAutomationMetadata composerMetadata)
+    {
+        if (!result.Success)
+        {
+            return result;
+        }
+
+        var target = new CodexComposerFillTarget(
+            targetWindowHandle,
+            targetProcessId,
+            result.Mode,
+            DateTimeOffset.UtcNow,
+            composerMetadata.Bounds,
+            composerMetadata.AutomationId,
+            composerMetadata.ClassName,
+            composerMetadata.ParentHierarchy);
+        StartupDiagnostics.Write(
+            $"codex_fill_target captured hwnd={targetWindowHandle.ToInt64()} " +
+            $"pid={targetProcessId} verificationMode={result.Mode}");
+        return result with { FillTarget = target };
+    }
+
     private static bool TrySetClipboardText(
         string text,
-        string stage)
+        string stage,
+        CancellationToken cancellationToken)
     {
         var success = TryClipboardOperation(
             $"{stage}.SetText",
             () =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 System.Windows.Clipboard.SetText(text, WpfTextDataFormat.UnicodeText);
                 return true;
             },

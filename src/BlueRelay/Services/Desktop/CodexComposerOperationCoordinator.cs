@@ -23,6 +23,14 @@ public sealed class CodexComposerOperationCoordinator
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operation);
+        return await RunAsync(_ => operation(), cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<CodexComposerInjectionResult> RunAsync(
+        Func<CancellationToken, CodexComposerInjectionResult> operation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
         cancellationToken.ThrowIfCancellationRequested();
 
         var gateAcquired = await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false);
@@ -34,9 +42,26 @@ public sealed class CodexComposerOperationCoordinator
         }
 
         Task<CodexComposerInjectionResult>? workerTask = null;
+        var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var operationStarted = false;
+        var released = false;
+
+        void ReleaseGate()
+        {
+            if (released)
+            {
+                return;
+            }
+
+            released = true;
+            operationCancellation.Dispose();
+            _gate.Release();
+        }
+
         try
         {
-            workerTask = _worker(operation);
+            operationStarted = true;
+            workerTask = _worker(() => operation(operationCancellation.Token));
             var timeoutTask = Task.Delay(_timeout);
             var cancellationTask = cancellationToken.CanBeCanceled
                 ? Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
@@ -62,28 +87,35 @@ public sealed class CodexComposerOperationCoordinator
                 }
                 finally
                 {
-                    _gate.Release();
+                    ReleaseGate();
                 }
             }
 
             if (completedTask == cancellationTask)
             {
-                _ = ReleaseWhenWorkerCompletesAsync(workerTask);
+                operationCancellation.Cancel();
+                _ = ReleaseWhenWorkerCompletesAsync(workerTask, operationCancellation);
                 return CodexComposerInjectionResult.Failed(
                     "codex_composer_cancelled",
                     "Codex composer operation was cancelled.");
             }
 
             StartupDiagnostics.Write($"Codex composer operation timed out elapsedMs={(long)_timeout.TotalMilliseconds}");
-            _ = ReleaseWhenWorkerCompletesAsync(workerTask);
+            operationCancellation.Cancel();
+            _ = ReleaseWhenWorkerCompletesAsync(workerTask, operationCancellation);
             return CodexComposerInjectionResult.Failed(
                 "codex_composer_probe_timeout",
-                "Codex composer probe timed out.");
+                "Codex operation timed out. Please retry.");
         }
         catch
         {
             if (gateAcquired && workerTask is null)
             {
+                if (operationStarted)
+                {
+                    operationCancellation.Dispose();
+                }
+
                 _gate.Release();
             }
 
@@ -91,7 +123,9 @@ public sealed class CodexComposerOperationCoordinator
         }
     }
 
-    private async Task ReleaseWhenWorkerCompletesAsync(Task<CodexComposerInjectionResult> workerTask)
+    private async Task ReleaseWhenWorkerCompletesAsync(
+        Task<CodexComposerInjectionResult> workerTask,
+        CancellationTokenSource operationCancellation)
     {
         try
         {
@@ -103,6 +137,7 @@ public sealed class CodexComposerOperationCoordinator
         }
         finally
         {
+            operationCancellation.Dispose();
             _gate.Release();
         }
     }
@@ -117,7 +152,19 @@ public static class StaAutomationWorker
 {
     public static Task<T> RunAsync<T>(Func<T> operation)
     {
+        return RunAsync(
+            operation,
+            ThreadPriority.Normal,
+            "BlueRelay Codex UI Automation");
+    }
+
+    public static Task<T> RunAsync<T>(
+        Func<T> operation,
+        ThreadPriority priority,
+        string threadName)
+    {
         ArgumentNullException.ThrowIfNull(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(threadName);
 
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -133,7 +180,8 @@ public static class StaAutomationWorker
         })
         {
             IsBackground = true,
-            Name = "BlueRelay Codex UI Automation"
+            Name = threadName,
+            Priority = priority
         };
 
         try

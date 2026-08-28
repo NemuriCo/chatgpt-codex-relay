@@ -1171,6 +1171,112 @@ public sealed class CodexDesktopComposerTests
     }
 
     [TestMethod]
+    public void SendButtonSelectorRequiresStableChromiumMetadataAndInvokePattern()
+    {
+        var send = SendButton("Send message", "send-button", "CodexSendButton");
+        var upload = SendButton("Upload file", "upload-button", "CodexUploadButton");
+
+        Assert.IsTrue(CodexSendButtonSelector.TrySelect([send, upload], out var selected));
+        Assert.AreSame(send, selected);
+    }
+
+    [TestMethod]
+    public void SendButtonSelectorRejectsDisabledAndAmbiguousCandidates()
+    {
+        var disabled = SendButton("Send", "send-button", "CodexSendButton") with { IsEnabled = false };
+        var first = SendButton("Send", "send-button-a", "CodexSendButton");
+        var second = SendButton("Send", "send-button-b", "CodexSendButton");
+
+        Assert.IsFalse(CodexSendButtonSelector.TrySelect([disabled], out _));
+        Assert.IsFalse(CodexSendButtonSelector.TrySelect([first, second], out _));
+    }
+
+    [TestMethod]
+    public void SendButtonSelectorRejectsNonChromiumOrNonInvokableControls()
+    {
+        var nonChromium = SendButton("Send", "send-button", "CodexSendButton") with { FrameworkId = "Win32" };
+        var nonInvokable = SendButton("Send", "send-button", "CodexSendButton") with { InvokePatternAvailable = false };
+
+        Assert.IsFalse(CodexSendButtonSelector.TrySelect([nonChromium], out _));
+        Assert.IsFalse(CodexSendButtonSelector.TrySelect([nonInvokable], out _));
+    }
+
+    [TestMethod]
+    public void SendCandidateDoesNotRequireLegacyIAccessiblePattern()
+    {
+        var invokeOnly = SendButton(
+            "Send",
+            "send-button",
+            "CodexSendButton",
+            legacyPatternAvailable: false);
+
+        Assert.IsTrue(CodexSendButtonSelector.TrySelect([invokeOnly], out var selected));
+        Assert.AreSame(invokeOnly, selected);
+    }
+
+    [TestMethod]
+    public void HasPatternTreatsNullPatternAsUnavailableWithoutCallingUiAutomation()
+    {
+        var method = typeof(WindowsCodexDesktopComposerSender).GetMethod(
+            "HasPattern",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        Assert.IsNotNull(method);
+        var result = method!.Invoke(null, new object?[] { null, null });
+
+        Assert.AreEqual(false, result);
+    }
+
+    [TestMethod]
+    public void CreateButtonMetadataSurvivesUnavailableOptionalPatternIdentifier()
+    {
+        var method = typeof(WindowsCodexDesktopComposerSender).GetMethod(
+            "CreateButtonMetadata",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var root = System.Windows.Automation.AutomationElement.RootElement;
+
+        Assert.IsNotNull(method);
+        var result = method!.Invoke(null, new object?[] { root, root.Current }) as CodexSendButtonMetadata;
+
+        Assert.IsNotNull(result);
+        if (System.Windows.Automation.AutomationPattern.LookupById(10018) is null)
+        {
+            Assert.IsFalse(result!.LegacyIAccessiblePatternAvailable);
+        }
+    }
+
+    [TestMethod]
+    public void FillReceiptContainsIdentityOnlyAndNoAutomationObjects()
+    {
+        var receipt = new CodexFillReceipt(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            3,
+            new IntPtr(42),
+            99,
+            CodexComposerInjectionMode.ClipboardInlineVerified,
+            DateTimeOffset.UtcNow);
+
+        Assert.AreEqual(3, receipt.FillGeneration);
+        Assert.AreEqual(new IntPtr(42), receipt.WindowHandle);
+        Assert.IsFalse(typeof(CodexFillReceipt)
+            .GetProperties()
+            .Any(property => typeof(System.Windows.Automation.AutomationElement).IsAssignableFrom(property.PropertyType)));
+    }
+
+    [TestMethod]
+    public void EmptyComposerProbeIsNotSendableWithoutAttachment()
+    {
+        var probe = new CodexComposerContentProbe(
+            true,
+            CodexComposerContentState.Empty,
+            HasAttachmentOrReference: false);
+
+        Assert.IsFalse(probe.HasSendableContent);
+    }
+
+    [TestMethod]
     public void ReplaceDialogHasExactlyTwoVisibleActions()
     {
         var buttons = AskDialogButtonConfiguration.ReplaceOrCancel("替换", "取消");
@@ -1259,6 +1365,32 @@ public sealed class CodexDesktopComposerTests
         Assert.AreEqual("codex_composer_probe_timeout", result.Code);
         Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromMilliseconds(250));
         Thread.Sleep(350);
+    }
+
+    [TestMethod]
+    public async Task TimeoutCancellationPreventsLateComposerSideEffects()
+    {
+        var focusCalled = false;
+        var clipboardCalled = false;
+        var sendInputCalled = false;
+        var coordinator = CreateCoordinator(TimeSpan.FromMilliseconds(60));
+
+        var result = await coordinator.RunAsync(cancellationToken =>
+        {
+            Thread.Sleep(300);
+            cancellationToken.ThrowIfCancellationRequested();
+            focusCalled = true;
+            clipboardCalled = true;
+            sendInputCalled = true;
+            return CodexComposerInjectionResult.Filled("late");
+        });
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual("codex_composer_probe_timeout", result.Code);
+        Thread.Sleep(350);
+        Assert.IsFalse(focusCalled);
+        Assert.IsFalse(clipboardCalled);
+        Assert.IsFalse(sendInputCalled);
     }
 
     [TestMethod]
@@ -1478,4 +1610,22 @@ public sealed class CodexDesktopComposerTests
             0,
             supportsTextPattern);
     }
+
+    private static CodexSendButtonMetadata SendButton(
+        string name,
+        string automationId,
+        string className,
+        bool legacyPatternAvailable = true) =>
+        new(
+            "Button",
+            "button",
+            automationId,
+            className,
+            "Chrome",
+            IsEnabled: true,
+            IsOffscreen: false,
+            InvokePatternAvailable: true,
+            LegacyIAccessiblePatternAvailable: legacyPatternAvailable,
+            new UiAutomationBounds(10, 700, 80, 32),
+            name);
 }
