@@ -31,7 +31,12 @@ public sealed class RelayTaskJsonConverter : JsonConverter<RelayTask>
             UserNote = ReadString(root, "UserNote"),
             ResultNote = ReadString(root, "ResultNote"),
             CodexTurnId = ReadString(root, "CodexTurnId"),
-            CodexError = ReadString(root, "CodexError")
+            CodexError = ReadString(root, "CodexError"),
+            CodexRunId = ReadGuid(root, "CodexRunId"),
+            CodexRunOutputCount = ReadInt32(root, "CodexRunOutputCount"),
+            CodexRunCompletedAt = ReadDateTimeOffset(root, "CodexRunCompletedAt"),
+            CodexRunCompletionMode = ReadString(root, "CodexRunCompletionMode"),
+            CodexRunCaptureMethodSummary = ReadString(root, "CodexRunCaptureMethodSummary")
         };
 
         if (TryGet(root, "Payload", out var payload) && payload.ValueKind is not JsonValueKind.Null)
@@ -42,6 +47,11 @@ public sealed class RelayTaskJsonConverter : JsonConverter<RelayTask>
         if (TryGet(root, "ResultPayload", out var resultPayload) && resultPayload.ValueKind is not JsonValueKind.Null)
         {
             task.ResultPayload = JsonSerializer.Deserialize<RelayPayload>(resultPayload.GetRawText(), options);
+        }
+
+        if (TryGet(root, "CodexPartialResultPayload", out var partialPayload) && partialPayload.ValueKind is not JsonValueKind.Null)
+        {
+            task.CodexPartialResultPayload = JsonSerializer.Deserialize<RelayPayload>(partialPayload.GetRawText(), options);
         }
 
         return task;
@@ -78,6 +88,13 @@ public sealed class RelayTaskJsonConverter : JsonConverter<RelayTask>
         writer.WriteString("ResultNote", value.ResultNote);
         writer.WriteString("CodexTurnId", value.CodexTurnId);
         writer.WriteString("CodexError", value.CodexError);
+        writer.WriteString("CodexRunId", value.CodexRunId?.ToString("D"));
+        writer.WriteNumber("CodexRunOutputCount", value.CodexRunOutputCount);
+        writer.WriteString("CodexRunCompletedAt", value.CodexRunCompletedAt?.ToString("O"));
+        writer.WriteString("CodexRunCompletionMode", value.CodexRunCompletionMode);
+        writer.WriteString("CodexRunCaptureMethodSummary", value.CodexRunCaptureMethodSummary);
+        writer.WritePropertyName("CodexPartialResultPayload");
+        JsonSerializer.Serialize(writer, value.CodexPartialResultPayload, options);
         writer.WriteEndObject();
     }
 
@@ -107,6 +124,13 @@ public sealed class RelayTaskJsonConverter : JsonConverter<RelayTask>
     {
         var value = ReadString(root, name);
         return Guid.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static int ReadInt32(JsonElement root, string name)
+    {
+        return TryGet(root, name, out var value) && value.TryGetInt32(out var parsed)
+            ? parsed
+            : 0;
     }
 
     private static DateTimeOffset? ReadDateTimeOffset(JsonElement root, string name)

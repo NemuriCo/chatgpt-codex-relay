@@ -27,8 +27,11 @@ public sealed class MainViewModel : ObservableObject
     private readonly ICodexBridge? _codexBridge;
     private readonly ICodexDesktopComposerInjector _codexDesktopComposerInjector;
     private readonly ICodexDesktopComposerSender _codexDesktopComposerSender;
+    private readonly ICodexRunObserver _codexRunObserver;
     private readonly Dictionary<Guid, CodexFillReceipt> _codexFillReceipts = [];
     private readonly Dictionary<Guid, long> _codexFillGenerations = [];
+    private readonly Dictionary<Guid, CodexRunObserverHandle> _codexRunHandles = [];
+    private readonly Dictionary<Guid, long> _codexRunGenerations = [];
     private readonly SemaphoreSlim _codexDesktopActionGate = new(1, 1);
     private readonly FocusedComposerProbeService _focusedComposerProbeService;
     private readonly RelayCommand _editProjectCommand;
@@ -118,7 +121,8 @@ public sealed class MainViewModel : ObservableObject
         ICodexBridge? codexBridge = null,
         ICodexDesktopComposerInjector? codexDesktopComposerInjector = null,
         FocusedComposerProbeService? focusedComposerProbeService = null,
-        ICodexDesktopComposerSender? codexDesktopComposerSender = null)
+        ICodexDesktopComposerSender? codexDesktopComposerSender = null,
+        ICodexRunObserver? codexRunObserver = null)
     {
         _state = state;
         _projectService = projectService;
@@ -129,6 +133,7 @@ public sealed class MainViewModel : ObservableObject
         _codexBridge = codexBridge ?? _browserBridge.CodexBridge;
         _codexDesktopComposerInjector = codexDesktopComposerInjector ?? new WindowsCodexDesktopComposerInjector();
         _codexDesktopComposerSender = codexDesktopComposerSender ?? new WindowsCodexDesktopComposerSender();
+        _codexRunObserver = codexRunObserver ?? new WindowsCodexRunObserver();
         _focusedComposerProbeService = focusedComposerProbeService ?? new FocusedComposerProbeService();
         Ui = LocalizationService.Current;
         _isAlwaysOnTop = state.IsAlwaysOnTop;
@@ -739,6 +744,14 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task StopCodexAsync()
     {
+        foreach (var handle in _codexRunHandles.Values.ToList())
+        {
+            handle.Cancel();
+        }
+
+        _codexRunHandles.Clear();
+        _codexRunGenerations.Clear();
+        _codexRunObserver.StopAll();
         _codexFillReceipts.Clear();
         _codexFillGenerations.Clear();
         if (_codexBridge is not null)
@@ -1337,6 +1350,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         ReconcileCodexFillReceipts();
+        ReconcileCodexRunObservers();
         RefreshTaskDetailWorkstream();
         RaiseCommandStates();
     }
@@ -1360,6 +1374,32 @@ public sealed class MainViewModel : ObservableObject
                     $"codex_fill_receipt_cleared workstreamId={pair.Key} " +
                     $"taskId={pair.Value.TaskId} generation={pair.Value.FillGeneration} " +
                     "reason=workstream_task_or_state_changed");
+            }
+        }
+    }
+
+    private void ReconcileCodexRunObservers()
+    {
+        foreach (var pair in _codexRunHandles.ToList())
+        {
+            var workstream = _projectService.FindWorkstreamForId(pair.Key);
+            var currentTaskMatches = workstream is not null &&
+                                     string.Equals(
+                                         workstream.CurrentTaskId,
+                                         pair.Value.Receipt.TaskId.ToString("D"),
+                                         StringComparison.OrdinalIgnoreCase);
+            var generationMatches = _codexRunGenerations.TryGetValue(pair.Key, out var generation) &&
+                                    generation == pair.Value.Receipt.Generation;
+            if (workstream is null ||
+                workstream.CurrentState != WorkflowState.CodexRunning ||
+                !currentTaskMatches ||
+                !generationMatches)
+            {
+                pair.Value.Cancel();
+                _codexRunHandles.Remove(pair.Key);
+                StartupDiagnostics.Write(
+                    $"codex_run_observer_stopped runId={pair.Value.Receipt.RunId} " +
+                    $"workstreamId={pair.Key} reason=stale_state_or_task");
             }
         }
     }
@@ -1671,6 +1711,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
+        CodexComposerSendResult? completedSendResult = null;
         try
         {
             var receiptWasPresent = TryGetCurrentReceipt(item, task.Id, out var receipt);
@@ -1697,7 +1738,9 @@ public sealed class MainViewModel : ObservableObject
             var sendResult = await _codexDesktopComposerSender
                 .SendAsync(receipt)
                 .ConfigureAwait(true);
-            if (!sendResult.Success)
+            completedSendResult = sendResult;
+            var receiptIsCurrentAfterSend = IsReceiptCurrent(item, task.Id, receipt);
+            if (CodexSendCommitPolicy.IsRetryableFailure(sendResult))
             {
                 if (sendResult.Code == "codex_send_window_changed")
                 {
@@ -1712,12 +1755,45 @@ public sealed class MainViewModel : ObservableObject
                 return;
             }
 
-            if (!IsReceiptCurrent(item, task.Id, receipt))
+            if (!CodexSendCommitPolicy.CanAdvanceToRun(sendResult))
             {
-                ClearFillReceipt(item.Id, "stale_after_send");
                 StartupDiagnostics.Write(
                     $"codex_send_state_transition success=false workstreamId={item.Id} " +
-                    $"taskId={task.Id} reason=stale_guard");
+                    $"taskId={task.Id} reason=missing_commit_state");
+                SetStatus(Ui.CodexSendFailed, isError: true);
+                return;
+            }
+
+            if (CodexSendCommitPolicy.ShouldClearFillReceipt(sendResult))
+            {
+                StartupDiagnostics.Write(
+                    $"codex_send_commit invokeSucceeded={sendResult.InvokeSucceeded} " +
+                    "committed=True workstreamId=" + item.Id + " taskId=" + task.Id);
+                // The receipt is single-use once InvokePattern.Invoke returns.
+                // Clear it before any state transition or observer work so a
+                // later failure cannot make the same send retryable.
+                ClearFillReceipt(item.Id, "send_committed");
+            }
+
+            if (!receiptIsCurrentAfterSend)
+            {
+                StartupDiagnostics.Write(
+                    $"codex_send_state_transition success=false workstreamId={item.Id} " +
+                    $"taskId={task.Id} reason=stale_guard committed={sendResult.SendCommitted}");
+                if (sendResult.SendCommitted && IsCurrentReadyForCodex(item, task.Id))
+                {
+                    task.Status = RelayTaskStatus.Error;
+                    task.CodexError = "Codex send committed, but the ReadyForCodex receipt became stale.";
+                    await _projectService.TryChangeStateAsync(
+                        item.ProjectId,
+                        item.Id,
+                        WorkflowState.NeedsAttention,
+                        manualOverride: false).ConfigureAwait(true);
+                    await _projectService.TrySaveAsync().ConfigureAwait(true);
+                    RefreshData(item.ProjectId, item.Id);
+                }
+
+                SetStatus(Ui.CodexSendSucceeded, isWarning: sendResult.SendCommitted);
                 return;
             }
 
@@ -1731,27 +1807,229 @@ public sealed class MainViewModel : ObservableObject
                 $"workstreamId={item.Id} taskId={task.Id}");
             if (!stateResult.Success)
             {
-                SetStatus(stateResult.Error, isError: true);
+                task.Status = RelayTaskStatus.Error;
+                task.CodexError = stateResult.Error;
+                await _projectService.TryChangeStateAsync(
+                    item.ProjectId,
+                    item.Id,
+                    WorkflowState.NeedsAttention,
+                    manualOverride: false).ConfigureAwait(true);
+                await _projectService.TrySaveAsync().ConfigureAwait(true);
+                RefreshData(item.ProjectId, item.Id);
+                SetStatus(Ui.CodexSendSucceeded, isWarning: true);
                 return;
             }
 
-            ClearFillReceipt(item.Id, "send_succeeded");
+            task.Status = RelayTaskStatus.CodexRunning;
+            task.Result = null;
+            task.ResultPayload = null;
+            task.CodexRunId = null;
+            task.CodexRunOutputCount = 0;
+            task.CodexRunCompletedAt = null;
+            task.CodexRunCompletionMode = null;
+            task.CodexRunCaptureMethodSummary = null;
+            task.CodexPartialResultPayload = null;
+            task.CodexError = null;
+            var taskSaveResult = await _projectService.TrySaveAsync().ConfigureAwait(true);
+            if (!taskSaveResult.Success)
+            {
+                StartupDiagnostics.Write(
+                    $"codex_send_commit persistence_warning workstreamId={item.Id} " +
+                    $"taskId={task.Id} error={taskSaveResult.Error}");
+            }
+
+            if (_codexRunObserver.IsWindowObserved(receipt.WindowHandle))
+            {
+                StartupDiagnostics.Write(
+                    $"codex_run_observer_start success=false workstreamId={item.Id} " +
+                    $"taskId={task.Id} hwnd={receipt.WindowHandle.ToInt64()} reason=window_already_observed");
+                task.Status = RelayTaskStatus.Error;
+                task.CodexError = "Codex run observation is already active for this window.";
+                await _projectService.TryChangeStateAsync(
+                    item.ProjectId,
+                    item.Id,
+                    WorkflowState.NeedsAttention,
+                    manualOverride: false).ConfigureAwait(true);
+                await _projectService.TrySaveAsync().ConfigureAwait(true);
+                RefreshData(item.ProjectId, item.Id);
+                SetStatus(Ui.CodexSendSucceeded, isWarning: true);
+                return;
+            }
+
+            var runGeneration = BeginCodexRunGeneration(item.Id);
+            var runReceipt = new CodexRunReceipt(
+                Guid.NewGuid(),
+                item.ProjectId,
+                item.Id,
+                task.Id,
+                runGeneration,
+                receipt.WindowHandle,
+                receipt.ProcessId,
+                DateTimeOffset.UtcNow,
+                receipt.VerificationMode,
+                sendResult.RunBaseline ?? CodexRunBaseline.Unavailable,
+                receipt.ComposerAutomationId,
+                receipt.ComposerClassName,
+                receipt.ComposerParentHierarchy,
+                receipt.ComposerBounds,
+                CodexRunSemanticAnchors.FromText(
+                    RelayPromptComposer.Compose(task.UserNote, task.Prompt)));
+            if (!_codexRunObserver.TryStart(runReceipt, out var observerHandle) || observerHandle is null)
+            {
+                StartupDiagnostics.Write(
+                    $"codex_run_observer_start success=false workstreamId={item.Id} " +
+                    $"taskId={task.Id} runId={runReceipt.RunId} reason=baseline_or_window_busy");
+                task.CodexError = "BlueRelay could not safely start Codex run observation.";
+                task.Status = RelayTaskStatus.Error;
+                await _projectService.TryChangeStateAsync(
+                    item.ProjectId,
+                    item.Id,
+                    WorkflowState.NeedsAttention,
+                    manualOverride: false).ConfigureAwait(true);
+                await _projectService.TrySaveAsync().ConfigureAwait(true);
+                RefreshData(item.ProjectId, item.Id);
+                SetStatus(Ui.CodexSendSucceeded, isWarning: true);
+                return;
+            }
+
+            _codexRunHandles[item.Id] = observerHandle;
+            StartupDiagnostics.Write(
+                $"codex_run_observer_start success=true workstreamId={item.Id} " +
+                $"taskId={task.Id} runId={runReceipt.RunId} generation={runGeneration}");
+            _ = ObserveCodexRunAsync(observerHandle);
+
             RefreshData(item.ProjectId, item.Id);
             SetStatus(Ui.CodexSendSucceeded);
         }
         catch (OperationCanceledException)
         {
-            SetStatus(Ui.CodexSendFailed, isError: true);
+            if (completedSendResult?.SendCommitted == true)
+            {
+                StartupDiagnostics.Write(
+                    $"codex_send_commit followup_cancelled workstreamId={item.Id} " +
+                    $"taskId={task.Id} committed=True");
+                SetStatus(Ui.CodexSendSucceeded, isWarning: true);
+            }
+            else
+            {
+                SetStatus(Ui.CodexSendFailed, isError: true);
+            }
         }
         catch (Exception exception)
         {
             StartupDiagnostics.WriteException("Send to Codex command", exception);
-            SetStatus(Ui.CodexSendFailed, isError: true);
+            SetStatus(
+                completedSendResult?.SendCommitted == true
+                    ? Ui.CodexSendSucceeded
+                    : Ui.CodexSendFailed,
+                isError: completedSendResult?.SendCommitted != true,
+                isWarning: completedSendResult?.SendCommitted == true);
         }
         finally
         {
+            if (completedSendResult?.SendCommitted == true &&
+                _codexDesktopComposerSender is ICodexDesktopComposerPostCheckScheduler postCheckScheduler)
+            {
+                postCheckScheduler.StartPostCheck(completedSendResult);
+            }
+
             EndCodexDesktopAction();
         }
+    }
+
+    private long BeginCodexRunGeneration(Guid workstreamId)
+    {
+        if (_codexRunHandles.Remove(workstreamId, out var previousHandle))
+        {
+            previousHandle.Cancel();
+        }
+
+        var generation = _codexRunGenerations.TryGetValue(workstreamId, out var previous)
+            ? previous + 1
+            : 1;
+        _codexRunGenerations[workstreamId] = generation;
+        return generation;
+    }
+
+    private async Task ObserveCodexRunAsync(CodexRunObserverHandle handle)
+    {
+        CodexRunResult result;
+        try
+        {
+            result = await handle.Completion.ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            StartupDiagnostics.WriteException("Codex run observer completion", exception);
+            return;
+        }
+
+        if (!_codexRunHandles.TryGetValue(handle.Receipt.WorkstreamId, out var currentHandle) ||
+            !ReferenceEquals(currentHandle, handle))
+        {
+            StartupDiagnostics.Write(
+                $"codex_run_result_written success=false runId={handle.Receipt.RunId} " +
+                "reason=stale_observer_handle");
+            return;
+        }
+
+        _codexRunHandles.Remove(handle.Receipt.WorkstreamId);
+        if (!IsCurrentCodexRun(handle.Receipt))
+        {
+            StartupDiagnostics.Write(
+                $"codex_run_result_written success=false runId={handle.Receipt.RunId} " +
+                "reason=stale_guard");
+            return;
+        }
+
+        if (result.Success)
+        {
+            var writeResult = await _browserBridge.CompleteObservedCodexRunAsync(
+                handle.Receipt,
+                result).ConfigureAwait(true);
+            StartupDiagnostics.Write(
+                $"codex_run_result_written success={writeResult.Success} " +
+                $"runId={handle.Receipt.RunId} outputCount={result.OutputsSafe.Count}");
+            if (writeResult.Success)
+            {
+                RefreshData(handle.Receipt.ProjectId, handle.Receipt.WorkstreamId);
+                SetStatus(Ui.CodexSendSucceeded);
+            }
+            else
+            {
+                SetStatus(writeResult.Error, isError: true);
+            }
+
+            return;
+        }
+
+        var failureResult = await _browserBridge.RecordObservedCodexRunFailureAsync(
+            handle.Receipt,
+            result).ConfigureAwait(true);
+        StartupDiagnostics.Write(
+            $"codex_run_result_written success={failureResult.Value is not null} " +
+            $"runId={handle.Receipt.RunId} outputCount={result.OutputsSafe.Count} " +
+            $"code={result.Code}");
+        if (failureResult.Value is not null)
+        {
+            RefreshData(handle.Receipt.ProjectId, handle.Receipt.WorkstreamId);
+        }
+
+        SetStatus(Ui.CodexSendFailed, isError: true);
+    }
+
+    private bool IsCurrentCodexRun(CodexRunReceipt receipt)
+    {
+        var workstream = _projectService.FindWorkstreamForId(receipt.WorkstreamId);
+        return workstream is not null &&
+               workstream.ProjectId == receipt.ProjectId &&
+               workstream.CurrentState == WorkflowState.CodexRunning &&
+               string.Equals(
+                   workstream.CurrentTaskId,
+                   receipt.TaskId.ToString("D"),
+                   StringComparison.OrdinalIgnoreCase) &&
+               _codexRunGenerations.TryGetValue(receipt.WorkstreamId, out var generation) &&
+               generation == receipt.Generation;
     }
 
     private long BeginFillReceiptGeneration(Guid workstreamId)
@@ -1867,7 +2145,8 @@ public sealed class MainViewModel : ObservableObject
             "codex_send_button_not_found" => Ui.CodexSendButtonNotFound,
             "codex_send_invoke_failed" => Ui.CodexSendInvokeFailed,
             "codex_send_window_changed" => Ui.CodexSendWindowChanged,
-            "codex_send_probe_timeout" => Ui.CodexSendFailed,
+            "codex_send_preinvoke_timeout" => Ui.CodexSendFailed,
+            "codex_send_cancelled" => Ui.CodexSendFailed,
             "codex_send_composer_content_unknown" => Ui.CodexSendContentUnknown,
             _ => Ui.CodexSendFailed
         };
@@ -1877,6 +2156,36 @@ public sealed class MainViewModel : ObservableObject
     {
         if (parameter is not ProjectListItemViewModel item)
         {
+            return;
+        }
+
+        if (_codexRunHandles.Remove(item.Id, out var observerHandle))
+        {
+            observerHandle.Cancel();
+            _codexRunGenerations[item.Id] = _codexRunGenerations.TryGetValue(item.Id, out var generation)
+                ? generation + 1
+                : 1;
+            var workstream = _projectService.FindWorkstreamForId(item.Id);
+            if (workstream is not null)
+            {
+                var task = _browserBridge.FindCurrentTask(item.Id);
+                if (task is not null)
+                {
+                    task.Status = RelayTaskStatus.Error;
+                    task.CodexError = "Codex run observation cancelled by the user.";
+                    task.UpdatedAt = DateTimeOffset.UtcNow;
+                }
+
+                await _projectService.TryChangeStateAsync(
+                    item.ProjectId,
+                    item.Id,
+                    WorkflowState.NeedsAttention,
+                    manualOverride: false).ConfigureAwait(true);
+                await _projectService.TrySaveAsync().ConfigureAwait(true);
+            }
+
+            RefreshData(item.ProjectId, item.Id);
+            SetStatus(Ui.CodexCancelled);
             return;
         }
 

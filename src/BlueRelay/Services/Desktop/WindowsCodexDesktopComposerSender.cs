@@ -4,7 +4,9 @@ using BlueRelay.Diagnostics;
 
 namespace BlueRelay.Services.Desktop;
 
-public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSender
+public sealed class WindowsCodexDesktopComposerSender :
+    ICodexDesktopComposerSender,
+    ICodexDesktopComposerPostCheckScheduler
 {
     private const int MaxComposerNodes = 3000;
     private const int MaxComposerDepth = 48;
@@ -12,7 +14,29 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
     private const int MaxSendSearchDepth = 8;
     private const int MaxParentDepth = 4;
     private const int LegacyIAccessiblePatternId = 10018;
-    private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan PreInvokeTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan PostInvokeCheckTimeout = TimeSpan.FromSeconds(1);
+    private readonly object _postCheckGate = new();
+    private PendingPostCheck? _pendingPostCheck;
+
+    public void StartPostCheck(CodexComposerSendResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        PendingPostCheck? pending;
+        lock (_postCheckGate)
+        {
+            if (_pendingPostCheck is null ||
+                !ReferenceEquals(_pendingPostCheck.Result, result))
+            {
+                return;
+            }
+
+            pending = _pendingPostCheck;
+            _pendingPostCheck = null;
+        }
+
+        _ = ObservePostSendCheckAsync(pending.Composer, pending.SendButton);
+    }
 
     public async Task<CodexComposerSendResult> SendAsync(
         CodexFillReceipt receipt,
@@ -22,11 +46,12 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
         cancellationToken.ThrowIfCancellationRequested();
 
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var operation = new SendOperationContext();
         var workerTask = StaAutomationWorker.RunAsync(
-            () => SendOnWorker(receipt, operationCancellation.Token),
+            () => SendOnWorker(receipt, operation, operationCancellation.Token),
             ThreadPriority.Normal,
             "BlueRelay Codex Send UI Automation");
-        var timeoutTask = Task.Delay(SendTimeout);
+        var timeoutTask = Task.Delay(PreInvokeTimeout);
         var cancellationTask = cancellationToken.CanBeCanceled
             ? Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
             : Task.Delay(Timeout.InfiniteTimeSpan);
@@ -38,21 +63,39 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
         }
 
         operationCancellation.Cancel();
+
+        // Reading the operation boundary is synchronized with InvokePattern.Invoke.
+        // If Invoke has started, let that call finish and return its committed result
+        // instead of converting a late timeout/cancellation into a retryable failure.
+        if (operation.InvokeAttempted)
+        {
+            try
+            {
+                var lateResult = await workerTask.ConfigureAwait(false);
+                return lateResult;
+            }
+            catch (OperationCanceledException) when (operation.SendCommitted)
+            {
+                return operation.CommittedResult!;
+            }
+        }
+
         if (completedTask == cancellationTask)
         {
             _ = ObserveWorkerAsync(workerTask, "Codex send cancellation worker");
             throw new OperationCanceledException(cancellationToken);
         }
 
-        StartupDiagnostics.Write("codex_send_probe_timeout");
+        StartupDiagnostics.Write("codex_send_preinvoke_timeout");
         _ = ObserveWorkerAsync(workerTask, "Codex send timeout worker");
         return CodexComposerSendResult.Failed(
-            "codex_send_probe_timeout",
-            "The Codex send operation timed out. Please retry.");
+            "codex_send_preinvoke_timeout",
+            "The Codex send operation did not reach the send button before the pre-invoke timeout. Please retry.");
     }
 
-    private static CodexComposerSendResult SendOnWorker(
+    private CodexComposerSendResult SendOnWorker(
         CodexFillReceipt receipt,
+        SendOperationContext operation,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -144,6 +187,7 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        var runBaseline = CodexRunSnapshotProbe.CaptureBaseline(window, composer, cancellationToken);
         try
         {
             var current = lookup.Selected.Current;
@@ -162,7 +206,19 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
             }
 
             StartupDiagnostics.Write("codex_send_invoke attempted=true");
-            invokePattern.Invoke();
+            if (!operation.InvokeIfNotCancelled(invokePattern, cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                StartupDiagnostics.Write("codex_send_invoke attempted=false reason=cancelled_before_invoke");
+                return CodexComposerSendResult.Failed(
+                    "codex_send_cancelled",
+                    "The Codex send operation was cancelled before send.",
+                    hasAttachmentOrReference: content.HasAttachmentOrReference,
+                    candidateCount: lookup.Candidates.Count,
+                    locatorMethod: lookup.LocatorMethod,
+                    buttonCandidates: lookup.Candidates);
+            }
+
             StartupDiagnostics.Write("codex_send_invoke attempted=true success=true");
         }
         catch (Exception exception) when (IsUiAutomationFailure(exception))
@@ -172,18 +228,14 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
             return CodexComposerSendResult.Failed(
                 "codex_send_invoke_failed",
                 "BlueRelay could not trigger Codex send. Check Codex and retry.",
+                invokeAttempted: operation.InvokeAttempted,
                 hasAttachmentOrReference: content.HasAttachmentOrReference,
                 candidateCount: lookup.Candidates.Count,
                 locatorMethod: lookup.LocatorMethod,
                 buttonCandidates: lookup.Candidates);
         }
 
-        var postCheck = CapturePostSendCheck(composer, lookup.Selected, cancellationToken);
-        StartupDiagnostics.Write(
-            $"codex_send_postcheck composerEmpty={postCheck.ComposerEmpty} " +
-            $"buttonPresent={postCheck.SendButtonPresent} " +
-            $"buttonEnabled={postCheck.SendButtonEnabled}");
-        return new CodexComposerSendResult(
+        var committedResult = new CodexComposerSendResult(
             true,
             "codex_send_invoked",
             "Codex send was invoked.",
@@ -194,7 +246,56 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
             Matched: true,
             LocatorMethod: lookup.LocatorMethod,
             ButtonCandidates: lookup.Candidates,
-            PostCheck: postCheck);
+            PostCheckStatus: CodexSendPostCheckStatus.Pending,
+            RunBaseline: runBaseline,
+            CommitState: CodexSendCommitState.Committed);
+        operation.MarkCommitted(committedResult);
+        StartupDiagnostics.Write("codex_send_commit invokeSucceeded=True committed=True");
+
+        lock (_postCheckGate)
+        {
+            _pendingPostCheck = new PendingPostCheck(
+                committedResult,
+                composer,
+                lookup.Selected);
+        }
+
+        return committedResult;
+    }
+
+    private static async Task ObservePostSendCheckAsync(
+        AutomationElement composer,
+        AutomationElement sendButton)
+    {
+        using var cancellation = new CancellationTokenSource(PostInvokeCheckTimeout);
+        try
+        {
+            var postCheck = await StaAutomationWorker.RunAsync(
+                    () => CapturePostSendCheck(composer, sendButton, cancellation.Token),
+                    ThreadPriority.BelowNormal,
+                    "BlueRelay Codex Send Postcheck")
+                .WaitAsync(cancellation.Token)
+                .ConfigureAwait(false);
+            StartupDiagnostics.Write(
+                $"codex_send_postcheck status=success nonBlocking=True " +
+                $"composerEmpty={postCheck.ComposerEmpty} " +
+                $"buttonPresent={postCheck.SendButtonPresent} " +
+                $"buttonEnabled={postCheck.SendButtonEnabled}");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            StartupDiagnostics.Write("codex_send_postcheck status=timeout nonBlocking=True");
+        }
+        catch (Exception exception) when (IsUiAutomationFailure(exception))
+        {
+            StartupDiagnostics.WriteException("Codex send postcheck", exception);
+            StartupDiagnostics.Write("codex_send_postcheck status=unavailable nonBlocking=True");
+        }
+        catch (Exception exception)
+        {
+            StartupDiagnostics.WriteException("Codex send postcheck", exception);
+            StartupDiagnostics.Write("codex_send_postcheck status=unavailable nonBlocking=True");
+        }
     }
 
     private static AutomationElement? FindComposer(
@@ -542,6 +643,7 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
         {
             cancellationToken.ThrowIfCancellationRequested();
             Thread.Sleep(delay);
+            cancellationToken.ThrowIfCancellationRequested();
             var content = ReadComposerContent(composer, cancellationToken);
             var present = false;
             var enabled = false;
@@ -563,6 +665,77 @@ public sealed class WindowsCodexDesktopComposerSender : ICodexDesktopComposerSen
 
         return last;
     }
+
+    private sealed class SendOperationContext
+    {
+        private readonly object _invokeGate = new();
+        private bool _invokeAttempted;
+        private CodexComposerSendResult? _committedResult;
+
+        public bool InvokeAttempted
+        {
+            get
+            {
+                lock (_invokeGate)
+                {
+                    return _invokeAttempted;
+                }
+            }
+        }
+
+        public bool SendCommitted
+        {
+            get
+            {
+                lock (_invokeGate)
+                {
+                    return _committedResult is not null;
+                }
+            }
+        }
+
+        public CodexComposerSendResult? CommittedResult
+        {
+            get
+            {
+                lock (_invokeGate)
+                {
+                    return _committedResult;
+                }
+            }
+        }
+
+        public bool InvokeIfNotCancelled(
+            InvokePattern invokePattern,
+            CancellationToken cancellationToken)
+        {
+            lock (_invokeGate)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                _invokeAttempted = true;
+                invokePattern.Invoke();
+                return true;
+            }
+        }
+
+        public void MarkCommitted(CodexComposerSendResult result)
+        {
+            ArgumentNullException.ThrowIfNull(result);
+            lock (_invokeGate)
+            {
+                _committedResult = result;
+            }
+        }
+    }
+
+    private sealed record PendingPostCheck(
+        CodexComposerSendResult Result,
+        AutomationElement Composer,
+        AutomationElement SendButton);
 
     private static void WriteButtonSearchDiagnostics(SendButtonLookup lookup)
     {

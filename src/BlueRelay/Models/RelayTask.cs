@@ -55,6 +55,18 @@ public sealed class RelayTask
 
     public string? CodexError { get; set; }
 
+    public Guid? CodexRunId { get; set; }
+
+    public int CodexRunOutputCount { get; set; }
+
+    public DateTimeOffset? CodexRunCompletedAt { get; set; }
+
+    public string? CodexRunCompletionMode { get; set; }
+
+    public string? CodexRunCaptureMethodSummary { get; set; }
+
+    public RelayPayload? CodexPartialResultPayload { get; set; }
+
     public string SourceTabKey { get; set; } = string.Empty;
 
     public string? SourceTabId { get; set; }

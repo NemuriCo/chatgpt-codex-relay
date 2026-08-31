@@ -30,7 +30,8 @@ public sealed record CodexSendButtonMetadata(
     bool InvokePatternAvailable,
     bool LegacyIAccessiblePatternAvailable,
     UiAutomationBounds Bounds,
-    string Name = "");
+    string Name = "",
+    string HelpText = "");
 
 public sealed record CodexComposerContentProbe(
     bool IsAvailable,
@@ -46,6 +47,28 @@ public sealed record CodexSendPostCheck(
     bool SendButtonPresent,
     bool SendButtonEnabled);
 
+/// <summary>
+/// Whether the irreversible InvokePattern call has returned successfully.
+/// </summary>
+public enum CodexSendCommitState
+{
+    NotAttempted,
+    NotCommitted,
+    Committed
+}
+
+/// <summary>
+/// Best-effort status for the non-blocking probe that follows a committed send.
+/// </summary>
+public enum CodexSendPostCheckStatus
+{
+    NotRun,
+    Pending,
+    Success,
+    Timeout,
+    Unavailable
+}
+
 public sealed record CodexComposerSendResult(
     bool Success,
     string Code,
@@ -58,10 +81,17 @@ public sealed record CodexComposerSendResult(
     bool Matched = false,
     string LocatorMethod = "",
     IReadOnlyList<CodexSendButtonMetadata>? ButtonCandidates = null,
-    CodexSendPostCheck? PostCheck = null)
+    CodexSendPostCheck? PostCheck = null,
+    CodexRunBaseline? RunBaseline = null,
+    CodexSendCommitState CommitState = CodexSendCommitState.NotAttempted,
+    CodexSendPostCheckStatus PostCheckStatus = CodexSendPostCheckStatus.NotRun)
 {
     public IReadOnlyList<CodexSendButtonMetadata> ButtonCandidatesSafe =>
         ButtonCandidates ?? Array.Empty<CodexSendButtonMetadata>();
+
+    public bool SendCommitted => CommitState == CodexSendCommitState.Committed;
+
+    public bool IsCommitted => SendCommitted;
 
     public static CodexComposerSendResult Failed(
         string code,
@@ -70,16 +100,42 @@ public sealed record CodexComposerSendResult(
         bool hasAttachmentOrReference = false,
         int candidateCount = 0,
         string locatorMethod = "",
-        IReadOnlyList<CodexSendButtonMetadata>? buttonCandidates = null) =>
+        IReadOnlyList<CodexSendButtonMetadata>? buttonCandidates = null,
+        bool invokeAttempted = false,
+        bool invokeSucceeded = false) =>
         new(
             false,
             code,
             message,
+            InvokeAttempted: invokeAttempted,
+            InvokeSucceeded: invokeSucceeded,
             ComposerEmpty: composerEmpty,
             HasAttachmentOrReference: hasAttachmentOrReference,
             CandidateCount: candidateCount,
             LocatorMethod: locatorMethod,
-            ButtonCandidates: buttonCandidates);
+            ButtonCandidates: buttonCandidates,
+            CommitState: CodexSendCommitState.NotCommitted);
+}
+
+public static class CodexSendCommitPolicy
+{
+    public static bool IsRetryableFailure(CodexComposerSendResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return !result.Success && !result.SendCommitted;
+    }
+
+    public static bool ShouldClearFillReceipt(CodexComposerSendResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return result.SendCommitted;
+    }
+
+    public static bool CanAdvanceToRun(CodexComposerSendResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return result.SendCommitted;
+    }
 }
 
 public interface ICodexDesktopComposerSender
@@ -87,6 +143,11 @@ public interface ICodexDesktopComposerSender
     Task<CodexComposerSendResult> SendAsync(
         CodexFillReceipt receipt,
         CancellationToken cancellationToken = default);
+}
+
+public interface ICodexDesktopComposerPostCheckScheduler
+{
+    void StartPostCheck(CodexComposerSendResult result);
 }
 
 public static class CodexSendButtonSelector

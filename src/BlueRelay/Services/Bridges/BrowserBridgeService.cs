@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using BlueRelay.Models;
 using BlueRelay.Persistence;
 using BlueRelay.Services.Codex;
+using BlueRelay.Services.Desktop;
 
 namespace BlueRelay.Services.Bridges;
 
@@ -740,6 +741,214 @@ public sealed class BrowserBridgeService
                     currentTask,
                     codexResult.ErrorCode ?? (codexResult.Cancelled ? "codex_cancelled" : "codex_failed"),
                     codexResult.Error ?? "Codex did not return a result.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<BridgeOperationResult<RelayTask>> CompleteObservedCodexRunAsync(
+        CodexRunReceipt receipt,
+        CodexRunResult runResult,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        ArgumentNullException.ThrowIfNull(runResult);
+        if (!runResult.Success || runResult.IsPartial || runResult.OutputsSafe.Count == 0 ||
+            runResult.OutputsSafe.Any(output => string.IsNullOrWhiteSpace(output.Text)))
+        {
+            return Failure<RelayTask>(
+                runResult.Code is "" ? "codex_run_no_outputs" :
+                runResult.IsPartial ? "codex_run_capture_incomplete" : runResult.Code,
+                string.IsNullOrWhiteSpace(runResult.Error)
+                    ? "Codex did not produce a valid result."
+                    : runResult.Error);
+        }
+
+        if (runResult.ProjectId != receipt.ProjectId ||
+            runResult.WorkstreamId != receipt.WorkstreamId ||
+            runResult.TaskId != receipt.TaskId ||
+            runResult.RunId != receipt.RunId ||
+            runResult.Generation != receipt.Generation ||
+            runResult.WindowHandle != receipt.WindowHandle ||
+            runResult.ProcessId != receipt.ProcessId)
+        {
+            return Failure<RelayTask>("codex_run_stale", "The observed Codex run is no longer current.");
+        }
+
+        var aggregate = CodexRunResultRenderer.Render(runResult.OutputsSafe);
+        if (string.IsNullOrWhiteSpace(aggregate))
+        {
+            return Failure<RelayTask>("codex_run_no_outputs", "Codex did not produce a valid assistant result.");
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var task = FindTask(receipt.TaskId);
+            var workstream = task is null ? null : _projectService.FindWorkstreamForId(receipt.WorkstreamId);
+            if (task is null || workstream is null ||
+                workstream.ProjectId != receipt.ProjectId ||
+                !IsCurrentTask(workstream, task) ||
+                workstream.CurrentState != WorkflowState.CodexRunning)
+            {
+                return Failure<RelayTask>("codex_run_stale", "The observed Codex run is no longer current.");
+            }
+
+            var payload = await _payloadStore.WriteAsync(
+                workstream.Id,
+                task.Id,
+                "result.md",
+                aggregate,
+                cancellationToken).ConfigureAwait(false);
+            var previousResult = task.Result;
+            var previousResultPayload = task.ResultPayload;
+            var previousStatus = task.Status;
+            var previousDeliveryStatus = task.DeliveryStatus;
+            var previousDeliveryErrorCode = task.DeliveryErrorCode;
+            var previousCodexError = task.CodexError;
+            var previousRunId = task.CodexRunId;
+            var previousOutputCount = task.CodexRunOutputCount;
+            var previousCompletedAt = task.CodexRunCompletedAt;
+            var previousCompletionMode = task.CodexRunCompletionMode;
+            var previousCaptureSummary = task.CodexRunCaptureMethodSummary;
+            task.Result = aggregate;
+            task.ResultPayload = payload;
+            task.CodexRunId = runResult.RunId;
+            task.CodexRunOutputCount = runResult.OutputsSafe.Count;
+            task.CodexRunCompletedAt = runResult.CompletedAtUtc ?? DateTimeOffset.UtcNow;
+            task.CodexRunCompletionMode = runResult.CompletionMode.ToString();
+            task.CodexRunCaptureMethodSummary = runResult.CaptureMethodSummary;
+            task.CodexError = null;
+            task.Status = RelayTaskStatus.ReadyForChatGPT;
+            task.DeliveryStatus = RelayCommandDeliveryStatus.None;
+            task.DeliveryErrorCode = null;
+            task.UpdatedAt = DateTimeOffset.UtcNow;
+            workstream.CodexProgress = "Codex 已完成";
+            workstream.CodexError = null;
+            workstream.CodexErrorCode = null;
+            var stateResult = await _projectService.TryChangeStateAsync(
+                workstream.ProjectId,
+                workstream.Id,
+                WorkflowState.ReadyForChatGPT,
+                manualOverride: false,
+                cancellationToken).ConfigureAwait(false);
+            if (!stateResult.Success)
+            {
+                task.Result = previousResult;
+                task.ResultPayload = previousResultPayload;
+                task.Status = previousStatus;
+                task.DeliveryStatus = previousDeliveryStatus;
+                task.DeliveryErrorCode = previousDeliveryErrorCode;
+                task.CodexError = previousCodexError;
+                task.CodexRunId = previousRunId;
+                task.CodexRunOutputCount = previousOutputCount;
+                task.CodexRunCompletedAt = previousCompletedAt;
+                task.CodexRunCompletionMode = previousCompletionMode;
+                task.CodexRunCaptureMethodSummary = previousCaptureSummary;
+                return Failure<RelayTask>("state_transition_failed", stateResult.Error);
+            }
+
+            var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+            if (!saveResult.Success)
+            {
+                return Failure<RelayTask>("persistence_failed", saveResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
+            return new BridgeOperationResult<RelayTask>(true, task);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<BridgeOperationResult<RelayTask>> RecordObservedCodexRunFailureAsync(
+        CodexRunReceipt receipt,
+        CodexRunResult runResult,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        ArgumentNullException.ThrowIfNull(runResult);
+        if (runResult.ProjectId != receipt.ProjectId ||
+            runResult.WorkstreamId != receipt.WorkstreamId ||
+            runResult.TaskId != receipt.TaskId ||
+            runResult.RunId != receipt.RunId ||
+            runResult.Generation != receipt.Generation ||
+            runResult.WindowHandle != receipt.WindowHandle ||
+            runResult.ProcessId != receipt.ProcessId)
+        {
+            return Failure<RelayTask>("codex_run_stale", "The observed Codex run is no longer current.");
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var task = FindTask(receipt.TaskId);
+            var workstream = task is null ? null : _projectService.FindWorkstreamForId(receipt.WorkstreamId);
+            if (task is null || workstream is null ||
+                workstream.ProjectId != receipt.ProjectId ||
+                !IsCurrentTask(workstream, task) ||
+                workstream.CurrentState != WorkflowState.CodexRunning)
+            {
+                return Failure<RelayTask>("codex_run_stale", "The observed Codex run is no longer current.");
+            }
+
+            if (runResult.OutputsSafe.Count > 0)
+            {
+                var partial = CodexRunResultRenderer.Render(runResult.OutputsSafe);
+                if (!string.IsNullOrWhiteSpace(partial))
+                {
+                    task.CodexPartialResultPayload = await _payloadStore.WriteAsync(
+                        workstream.Id,
+                        task.Id,
+                        "result.partial.md",
+                        partial,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            task.CodexRunId = runResult.RunId;
+            task.CodexRunOutputCount = runResult.OutputsSafe.Count;
+            task.CodexRunCompletedAt = runResult.CompletedAtUtc;
+            task.CodexRunCompletionMode = runResult.CompletionMode.ToString();
+            task.CodexRunCaptureMethodSummary = runResult.CaptureMethodSummary;
+            task.CodexError = string.IsNullOrWhiteSpace(runResult.Error)
+                ? "Codex run did not complete with a capturable result."
+                : runResult.Error;
+            task.Status = RelayTaskStatus.Error;
+            task.UpdatedAt = DateTimeOffset.UtcNow;
+            workstream.CodexError = task.CodexError;
+            workstream.CodexErrorCode = runResult.Code;
+            workstream.CodexProgress = null;
+            var targetState = runResult.OutputsSafe.Count > 0
+                ? WorkflowState.NeedsAttention
+                : WorkflowState.Error;
+            var stateResult = await _projectService.TryChangeStateAsync(
+                workstream.ProjectId,
+                workstream.Id,
+                targetState,
+                manualOverride: false,
+                cancellationToken).ConfigureAwait(false);
+            if (!stateResult.Success)
+            {
+                return Failure<RelayTask>("state_transition_failed", stateResult.Error);
+            }
+
+            var saveResult = await _projectService.TrySaveAsync(cancellationToken).ConfigureAwait(false);
+            if (!saveResult.Success)
+            {
+                return Failure<RelayTask>("persistence_failed", saveResult.Error);
+            }
+
+            Changed?.Invoke(this, EventArgs.Empty);
+            return new BridgeOperationResult<RelayTask>(
+                false,
+                task,
+                runResult.Code,
+                task.CodexError ?? "Codex run did not complete.");
         }
         finally
         {

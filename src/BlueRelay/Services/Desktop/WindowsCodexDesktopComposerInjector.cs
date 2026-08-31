@@ -2301,7 +2301,7 @@ public sealed class WindowsCodexDesktopComposerInjector : ICodexDesktopComposerI
         IntPtr ForegroundAfter,
         bool ForegroundMatchesTarget);
 
-    private sealed class ClipboardSnapshot
+    internal sealed class ClipboardSnapshot
     {
         private readonly string? _text;
         private readonly bool _hadText;
